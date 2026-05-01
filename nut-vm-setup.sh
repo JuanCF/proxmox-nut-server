@@ -522,7 +522,7 @@ detect_ups() {
             local vendor_name="${UPS_VENDORS[$vendor]:-Unknown}"
 
             # Add to list if it's a known UPS vendor or has UPS-like name
-            if [[ -n "${UPS_VENDORS[$vendor]}" ]] || [[ "$name" =~ [Uu][Pp][Ss] ]]; then
+            if [[ -n "${UPS_VENDORS[$vendor]:-}" ]] || [[ "$name" =~ [Uu][Pp][Ss] ]]; then
                 usb_devices+=("$vendor:$product")
                 device_info+=("Bus $bus Device $device - $vendor_name ($vendor:$product) - $name")
                 ((i++))
