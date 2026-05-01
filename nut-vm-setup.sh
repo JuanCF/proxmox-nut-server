@@ -18,8 +18,9 @@ readonly UBUNTU_IMG_URL="https://cloud-images.ubuntu.com/noble/current/noble-ser
 readonly UBUNTU_IMG_NAME="noble-server-cloudimg-amd64.img"
 readonly IMG_CACHE_DIR="/var/lib/vz/template/iso"
 readonly NUT_DEFAULT_PORT=3493
-readonly SSH_TIMEOUT=180
+readonly SSH_TIMEOUT=300
 readonly SSH_POLL_INTERVAL=5
+readonly VM_START_DELAY=120
 readonly SCRIPT_VERSION="1.0.0"
 
 # UPS Vendor IDs
@@ -120,6 +121,35 @@ spinner_stop() {
 # Section 2: Input/Prompt Helper Functions
 #===============================================================================
 
+# Passwords storage for autogeneration
+AUTO_GENERATE_PASSWORDS=false
+GENERATED_PASSWORDS=()
+
+generate_password() {
+    local length="${1:-16}"
+    local password
+    # Generate a secure password with mixed case, numbers, and special chars
+    password=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c "$length")
+    # Fallback if openssl doesn't produce enough chars
+    if [[ ${#password} -lt $length ]]; then
+        password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w "$length" | head -n 1)
+    fi
+    echo "$password"
+}
+
+prompt_autogenerate_passwords() {
+    echo
+    echo -e "${C_BOLD}Password Configuration:${C_RESET}"
+    echo "You can either:"
+    echo "  1. Enter passwords manually (default)"
+    echo "  2. Auto-generate secure passwords"
+    echo
+    if prompt_yes_no "Auto-generate all passwords?" "n"; then
+        AUTO_GENERATE_PASSWORDS=true
+        msg_ok "Passwords will be auto-generated and shown at the end"
+    fi
+}
+
 prompt_default() {
     local varname="$1"
     local prompt_text="$2"
@@ -134,6 +164,14 @@ prompt_password() {
     local varname="$1"
     local prompt_text="$2"
     local pass1 pass2
+
+    # If auto-generate is enabled, generate a password
+    if [[ "$AUTO_GENERATE_PASSWORDS" == "true" ]]; then
+        pass1=$(generate_password 16)
+        printf -v "$varname" '%s' "$pass1"
+        GENERATED_PASSWORDS+=("$prompt_text: $pass1")
+        return 0
+    fi
 
     while true; do
         read -rsp "${prompt_text}: " pass1
@@ -440,14 +478,40 @@ inject_ssh_key() {
         if [[ -d "$TEMP_KEY_DIR" ]]; then
             rm -rf "$TEMP_KEY_DIR"
         fi
+        # Also cleanup cloud-init snippet if it exists
+        if [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]]; then
+            rm -f "$CLOUDINIT_SNIPPET"
+        fi
     }
     trap cleanup_temp_keys EXIT
 
     msg_ok "Generated temporary SSH keys"
 }
 
+generate_cloudinit_snippet() {
+    local snippet_path="/var/lib/vz/snippets/nut-vm-${VM_ID}-cloudinit.yaml"
+
+    # Create snippets directory if it doesn't exist
+    mkdir -p "/var/lib/vz/snippets"
+
+    cat > "$snippet_path" << 'EOF'
+#cloud-config
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+EOF
+
+    CLOUDINIT_SNIPPET="$snippet_path"
+    msg_ok "Generated cloud-init snippet for qemu-guest-agent"
+}
+
 create_vm() {
     local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
+
+    # Generate cloud-init snippet first (required for guest agent installation)
+    generate_cloudinit_snippet
 
     msg_info "Creating VM $VM_ID..."
     spinner_start "Creating VM..."
@@ -494,6 +558,9 @@ create_vm() {
     qm set "$VM_ID" --cipassword "$VM_PASSWORD" &>/dev/null
     qm set "$VM_ID" --sshkeys "$TEMP_SSH_PUB" &>/dev/null
 
+    # Attach custom cloud-init snippet for qemu-guest-agent installation
+    qm set "$VM_ID" --cicustom "vendor=local:snippets/nut-vm-${VM_ID}-cloudinit.yaml" &>/dev/null
+
     VM_CREATED=true
     msg_ok "VM configured"
 }
@@ -509,7 +576,27 @@ detect_ups() {
     local device_info=()
     local i=0
 
-    # Parse lsusb output
+    # Check if lsusb is available
+    if ! command -v lsusb &>/dev/null; then
+        msg_warn "lsusb not found - USB detection unavailable"
+        msg_info "You can still configure USB passthrough manually"
+        if prompt_yes_no "Enter UPS vendor:product manually?" "n"; then
+            read -rp "Enter UPS vendor:product (e.g., 051d:0002): " UPS_VENDOR_PRODUCT
+        fi
+        return
+    fi
+
+    # Parse lsusb output with timeout to prevent hanging
+    local lsusb_output
+    lsusb_output=$(timeout 10 lsusb 2>/dev/null) || {
+        msg_warn "USB device detection timed out (lsusb hung)"
+        msg_info "This can happen with certain USB controllers"
+        if prompt_yes_no "Enter UPS vendor:product manually?" "n"; then
+            read -rp "Enter UPS vendor:product (e.g., 051d:0002): " UPS_VENDOR_PRODUCT
+        fi
+        return
+    }
+
     while IFS= read -r line; do
         if [[ "$line" =~ Bus[[:space:]]([0-9]+)[[:space:]]Device[[:space:]]([0-9]+).+ID[[:space:]]([0-9a-f]{4}):([0-9a-f]{4})[[:space:]]*(.*) ]]; then
             local bus="${BASH_REMATCH[1]}"
@@ -525,10 +612,10 @@ detect_ups() {
             if [[ -n "${UPS_VENDORS[$vendor]:-}" ]] || [[ "$name" =~ [Uu][Pp][Ss] ]]; then
                 usb_devices+=("$vendor:$product")
                 device_info+=("Bus $bus Device $device - $vendor_name ($vendor:$product) - $name")
-                ((i++))
+                ((++i))
             fi
         fi
-    done < <(lsusb 2>/dev/null)
+    done <<< "$lsusb_output"
 
     UPS_DEVICE_COUNT=$i
 
@@ -561,7 +648,7 @@ detect_ups() {
         local dev
         for dev in "${usb_devices[@]}"; do
             if [[ "$dev" == "$UPS_VENDOR_PRODUCT" ]]; then
-                ((duplicates++))
+                ((++duplicates))
             fi
         done
 
@@ -829,7 +916,7 @@ deploy_nut_script() {
     spinner_start "Copying install script..."
 
     # Wait a bit for cloud-init to finish
-    sleep 10
+    sleep 20
 
     # Copy script to VM
     local retry_count=0
@@ -838,6 +925,9 @@ deploy_nut_script() {
     while [[ $retry_count -lt $max_retries ]]; do
         if echo "$NUT_INSTALL_SCRIPT" | ssh -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            -o GSSAPIAuthentication=no \
+            -o PasswordAuthentication=no \
             -i "$TEMP_SSH_KEY" \
             "${VM_USER}@${VM_IP}" \
             "cat > $remote_script_path" 2>/dev/null; then
@@ -861,7 +951,10 @@ deploy_nut_script() {
 
     NUT_INSTALL_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 \
         -o ServerAliveInterval=30 \
+        -o GSSAPIAuthentication=no \
+        -o PasswordAuthentication=no \
         -i "$TEMP_SSH_KEY" \
         "${VM_USER}@${VM_IP}" \
         "sudo bash $remote_script_path" 2>&1) || true
@@ -880,6 +973,8 @@ deploy_nut_script() {
     # Cleanup remote script
     ssh -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
+        -o GSSAPIAuthentication=no \
+        -o PasswordAuthentication=no \
         -i "$TEMP_SSH_KEY" \
         "${VM_USER}@${VM_IP}" \
         "rm -f $remote_script_path" 2>/dev/null || true
@@ -911,6 +1006,20 @@ print_summary() {
     printf "${C_BOLD}║${C_RESET}  Test command:                             ${C_BOLD}║${C_RESET}\n"
     printf "${C_BOLD}║${C_RESET}    upsc %s@${VM_IP}                ${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME"
     echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
+
+    # Show auto-generated passwords if applicable
+    if [[ "$AUTO_GENERATE_PASSWORDS" == "true" && ${#GENERATED_PASSWORDS[@]} -gt 0 ]]; then
+        echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
+        printf "${C_BOLD}║${C_RESET}  ${C_BOLD}${C_WARN}AUTO-GENERATED PASSWORDS (SAVE THESE!):${C_RESET}     ${C_BOLD}║${C_RESET}\n"
+        echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
+        for pwd_entry in "${GENERATED_PASSWORDS[@]}"; do
+            printf "${C_BOLD}║${C_RESET}    %s${C_BOLD}║${C_RESET}\n" "$(printf '%-56s' "$pwd_entry")"
+        done
+        echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
+        printf "${C_BOLD}║${C_RESET}  ${C_INFO}IMPORTANT: Store these passwords securely!${C_RESET}  ${C_BOLD}║${C_RESET}\n"
+        echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
+    fi
+
     printf "${C_BOLD}║${C_RESET}  Client upsmon.conf snippet:               ${C_BOLD}║${C_RESET}\n"
     printf "${C_BOLD}║${C_RESET}  MONITOR %s@%s:${NUT_LISTEN_PORT} 1 %s PASS slave  ${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME" "$VM_IP" "$NUT_MONITOR_USER"
 
@@ -958,6 +1067,7 @@ main() {
     inject_ssh_key
 
     # Collect configuration
+    prompt_autogenerate_passwords
     collect_vm_config
     collect_nut_config
 
@@ -988,6 +1098,16 @@ main() {
 
     # Start VM
     start_vm
+
+    # Give VM time to boot before attempting SSH connections
+    msg_info "Waiting ${VM_START_DELAY}s for VM to initialize..."
+    local remaining="$VM_START_DELAY"
+    while [[ $remaining -gt 0 ]]; do
+        printf "\r${C_INFO}[WAIT]${C_RESET} %2d seconds remaining..." "$remaining"
+        sleep 1
+        ((remaining--))
+    done
+    echo
 
     # Get VM IP (must happen before wait_ssh)
     get_vm_ip
