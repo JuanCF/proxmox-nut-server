@@ -38,13 +38,21 @@ Other USB UPS devices can be configured manually.
 
 ## Installation
 
+### Quick Install (One-Liner)
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/nut-vm-setup.sh)"
+```
+
+### Manual Download
+
 ```bash
 # Download the script
 curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/nut-vm-setup.sh -o nut-vm-setup.sh
 
 # Or clone the repository
 git clone https://github.com/JuanCF/proxmox-nut-server.git
-cd nut-vm-setup
+cd proxmox-nut-server
 
 # Make it executable
 chmod +x nut-vm-setup.sh
