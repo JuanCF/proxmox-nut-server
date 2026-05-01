@@ -642,12 +642,26 @@ get_vm_ip() {
     local elapsed=0
     local max_wait=120
     local ip=""
+    local node
+    node=$(hostname)
 
     while [[ $elapsed -lt $max_wait ]]; do
-        ip=$(qm guest exec "$VM_ID" -- ip -4 -o addr show eth0 2>/dev/null | \
-            grep -oP '(?<=inet\s)[0-9]+(\.[0-9]+){3}' | head -1)
+        ip=$(pvesh get "/nodes/${node}/qemu/${VM_ID}/agent/network-get-interfaces" \
+            --output-format json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for iface in data.get('result', []):
+        for addr in iface.get('ip-addresses', []):
+            a = addr.get('ip-address', '')
+            if addr.get('ip-address-type') == 'ipv4' and not a.startswith('127.') and not a.startswith('169.254.'):
+                print(a)
+                sys.exit(0)
+except:
+    pass
+" 2>/dev/null || true)
 
-        if [[ -n "$ip" ]] && [[ "$ip" != "127.0.0.1" ]]; then
+        if [[ -n "$ip" ]]; then
             spinner_stop
             VM_IP="$ip"
             msg_ok "VM IP address: $VM_IP"
@@ -975,13 +989,11 @@ main() {
     # Start VM
     start_vm
 
+    # Get VM IP (must happen before wait_ssh)
+    get_vm_ip
+
     # Wait for SSH
     wait_ssh "$VM_IP" 22
-
-    # Get VM IP (from guest agent or manual)
-    if [[ -z "${VM_IP:-}" ]]; then
-        get_vm_ip
-    fi
 
     # Install NUT
     run_nut_install
