@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # nut-vm-setup.sh - Proxmox NUT Server VM Setup Script
 #
@@ -6,9 +6,6 @@
 # and installs/configures NUT (Network UPS Tools) in netserver mode.
 #
 # Must be run as root on a Proxmox host.
-
-set -euo pipefail
-IFS=$'\n\t'
 
 #===============================================================================
 # Section 0: Constants
@@ -47,106 +44,131 @@ readonly -A DRIVER_DESCS=(
 )
 
 #===============================================================================
-# Section 1: UI/Output Helper Functions
+# Section 1: Colors, Symbols, and UI Helpers
 #===============================================================================
 
-# Colors
-readonly C_INFO='\033[0;36m'    # Cyan
-readonly C_OK='\033[0;32m'     # Green
-readonly C_WARN='\033[0;33m'   # Yellow
-readonly C_ERROR='\033[0;31m' # Red
-readonly C_RESET='\033[0m'    # Reset
-readonly C_BOLD='\033[1m'     # Bold
+YW=$(echo "\033[33m")
+YWB=$(echo "\033[93m")
+BL=$(echo "\033[36m")
+RD=$(echo "\033[01;31m")
+BGN=$(echo "\033[4;92m")
+GN=$(echo "\033[1;92m")
+DGN=$(echo "\033[32m")
+BOLD=$(echo "\033[1m")
+CL=$(echo "\033[m")
 
-# Spinner variables
+CM="  ✔️  ${CL}"
+CROSS="  ✖️  ${CL}"
+INFO="  💡  ${CL}"
+
+BFR="\\r\\033[K"
+HOLD=" "
+TAB="  "
+
 SPINNER_PID=""
-SPINNER_MSG=""
 
-msg_info() {
-    echo -e "${C_INFO}[INFO]${C_RESET} $1"
-}
-
-msg_ok() {
-    echo -e "${C_OK}[OK]${C_RESET} $1"
-}
-
-msg_error() {
-    echo -e "${C_ERROR}[ERROR]${C_RESET} $1" >&2
-    exit 1
-}
-
-msg_warn() {
-    echo -e "${C_WARN}[WARN]${C_RESET} $1"
-}
-
-msg_header() {
-    local title="$1"
-    local width=60
-    local padding=$(( (width - ${#title} - 2) / 2 ))
-    echo
-    echo -e "${C_BOLD}╔$(printf '═%.0s' $(seq 1 $width))╗${C_RESET}"
-    printf "${C_BOLD}║%${padding}s %s %${padding}s║${C_RESET}\n" "" "$title" ""
-    echo -e "${C_BOLD}╚$(printf '═%.0s' $(seq 1 $width))╝${C_RESET}"
-    echo
-}
-
-spinner_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
-
-_spinner_task() {
-    local i=0
+spinner() {
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local spin_i=0
+    printf "\e[?25l"
     while true; do
-        printf "\r${C_INFO}%s${C_RESET} %s" "${spinner_chars[$((i % 10))]}" "$SPINNER_MSG"
-        i=$((i + 1))
+        printf "\r ${YWB}%s${CL}" "${frames[spin_i]}"
+        spin_i=$(( (spin_i + 1) % ${#frames[@]} ))
         sleep 0.1
     done
 }
 
-spinner_start() {
-    SPINNER_MSG="$1"
-    _spinner_task &
+msg_info() {
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+    local msg="$1"
+    echo -ne "${TAB}${YW}${HOLD}${msg}${HOLD}"
+    spinner &
     SPINNER_PID=$!
-    disown $SPINNER_PID
 }
 
-spinner_stop() {
-    if [[ -n "$SPINNER_PID" ]] && kill -0 $SPINNER_PID 2>/dev/null; then
-        kill $SPINNER_PID 2>/dev/null
-        wait $SPINNER_PID 2>/dev/null
-        echo -e "\r\033[K"
-    fi
+msg_ok() {
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+    printf "\e[?25h"
+    local msg="$1"
+    echo -e "${BFR}${CM}${GN}${msg}${CL}"
     SPINNER_PID=""
 }
 
+msg_error() {
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+    printf "\e[?25h"
+    local msg="$1"
+    echo -e "${BFR}${CROSS}${RD}${msg}${CL}"
+    SPINNER_PID=""
+    exit 1
+}
+
+msg_warn() {
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID" && printf "\e[?25h"
+    SPINNER_PID=""
+    local msg="$1"
+    echo -e "${TAB}${YW}⚠${CL} ${msg}"
+}
+
+error_handler() {
+    local exit_code="$?"
+    local line_number="$1"
+    local command="$2"
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+    printf "\e[?25h"
+    echo -e "\n${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}\n"
+}
+
+catch_errors() {
+    set -Eeuo pipefail
+    trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
+}
+
+# VERBOSE=yes to see full command output; default suppresses it
+VERBOSE="${VERBOSE:-no}"
+if [[ "$VERBOSE" == "yes" ]]; then
+    STD=""
+else
+    STD=">/dev/null 2>&1"
+fi
+
+header_info() {
+    clear
+    cat <<"EOF"
+    _   _ _   _ _____
+   | \ | | | | |_   _|
+   |  \| | | | | | |
+   | |\  | |_| | | |
+   |_| \_|\___/  |_|
+
+   Proxmox NUT Server VM Setup
+EOF
+}
+
 #===============================================================================
-# Section 2: Input/Prompt Helper Functions
+# Section 2: Input/Prompt Helper Functions (whiptail)
 #===============================================================================
 
-# Passwords storage for autogeneration
 AUTO_GENERATE_PASSWORDS=false
 GENERATED_PASSWORDS=()
 
 generate_password() {
     local length="${1:-16}"
     local password
-    # Generate a secure password with mixed case, numbers, and special chars
     password=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c "$length")
-    # Fallback if openssl doesn't produce enough chars
     if [[ ${#password} -lt $length ]]; then
-        password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w "$length" | head -n 1)
+        password=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w "$length" | head -n 1)
     fi
     echo "$password"
 }
 
 prompt_autogenerate_passwords() {
-    echo
-    echo -e "${C_BOLD}Password Configuration:${C_RESET}"
-    echo "You can either:"
-    echo "  1. Enter passwords manually (default)"
-    echo "  2. Auto-generate secure passwords"
-    echo
-    if prompt_yes_no "Auto-generate all passwords?" "n"; then
+    if whiptail --backtitle "Proxmox VE Helper Scripts" \
+                --title "PASSWORD CONFIGURATION" \
+                --yesno "Auto-generate all passwords?\n\nYes = generate secure passwords automatically.\nNo  = enter them manually." \
+                12 58; then
         AUTO_GENERATE_PASSWORDS=true
-        msg_ok "Passwords will be auto-generated and shown at the end"
+        msg_ok "Passwords will be auto-generated"
     fi
 }
 
@@ -154,53 +176,62 @@ prompt_default() {
     local varname="$1"
     local prompt_text="$2"
     local default_value="$3"
-    local input
+    local title="${4:-INPUT}"
+    local result
 
-    read -rp "${prompt_text} [${default_value}]: " input
-    printf -v "$varname" '%s' "${input:-$default_value}"
+    result=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                      --title "$title" \
+                      --inputbox "$prompt_text" \
+                      8 58 "$default_value" \
+                      3>&1 1>&2 2>&3) || msg_error "Cancelled by user"
+
+    printf -v "$varname" '%s' "${result:-$default_value}"
 }
 
 prompt_password() {
     local varname="$1"
     local prompt_text="$2"
-    local pass1 pass2
 
-    # If auto-generate is enabled, generate a password
     if [[ "$AUTO_GENERATE_PASSWORDS" == "true" ]]; then
-        pass1=$(generate_password 16)
-        printf -v "$varname" '%s' "$pass1"
-        GENERATED_PASSWORDS+=("$prompt_text: $pass1")
+        local pass
+        pass=$(generate_password 16)
+        printf -v "$varname" '%s' "$pass"
+        GENERATED_PASSWORDS+=("$prompt_text: $pass")
         return 0
     fi
 
+    local pass1 pass2
     while true; do
-        read -rsp "${prompt_text}: " pass1
-        echo
-        read -rsp "Confirm password: " pass2
-        echo
+        pass1=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                         --title "PASSWORD" \
+                         --passwordbox "$prompt_text" \
+                         8 58 \
+                         3>&1 1>&2 2>&3) || msg_error "Cancelled by user"
+
+        pass2=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                         --title "PASSWORD" \
+                         --passwordbox "Confirm: $prompt_text" \
+                         8 58 \
+                         3>&1 1>&2 2>&3) || msg_error "Cancelled by user"
+
         if [[ "$pass1" == "$pass2" ]]; then
             printf -v "$varname" '%s' "$pass1"
             return 0
-        else
-            msg_warn "Passwords do not match. Please try again."
         fi
+        whiptail --backtitle "Proxmox VE Helper Scripts" \
+                 --title "MISMATCH" \
+                 --msgbox "Passwords do not match. Please try again." 8 58
     done
 }
 
 prompt_yes_no() {
     local question="$1"
     local default="${2:-y}"
-    local yn
+    local title="${3:-CONFIRM}"
+    local args=(--backtitle "Proxmox VE Helper Scripts" --title "$title" --yesno "$question" 12 62)
 
-    if [[ "$default" == "y" ]]; then
-        read -rp "${question} [Y/n]: " yn
-        yn="${yn:-Y}"
-    else
-        read -rp "${question} [y/N]: " yn
-        yn="${yn:-N}"
-    fi
-
-    [[ "$yn" =~ ^[Yy]$ ]]
+    [[ "$default" == "n" ]] && args+=(--defaultno)
+    whiptail "${args[@]}"
 }
 
 prompt_menu() {
@@ -208,23 +239,20 @@ prompt_menu() {
     local title="$2"
     shift 2
     local items=("$@")
-    local choice
-
-    echo
-    echo -e "${C_BOLD}${title}${C_RESET}"
+    local menu_items=()
+    local i
     for i in "${!items[@]}"; do
-        echo "  $((i + 1)). ${items[$i]}"
+        menu_items+=("$((i + 1))" "${items[$i]}")
     done
 
-    while true; do
-        read -rp "Select option (1-${#items[@]}): " choice
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
-            printf -v "$varname" '%s' "$((choice - 1))"
-            return 0
-        else
-            msg_warn "Invalid selection. Please enter a number between 1 and ${#items[@]}."
-        fi
-    done
+    local choice
+    choice=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                      --title "$title" \
+                      --menu "Select an option:" 16 70 "${#items[@]}" \
+                      "${menu_items[@]}" \
+                      3>&1 1>&2 2>&3) || msg_error "Cancelled by user"
+
+    printf -v "$varname" '%s' "$((choice - 1))"
 }
 
 prompt_integer() {
@@ -236,14 +264,20 @@ prompt_integer() {
     local input
 
     while true; do
-        read -rp "${prompt_text} [${default_value}]: " input
+        input=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                         --title "INPUT" \
+                         --inputbox "$prompt_text (${min}-${max}):" \
+                         8 58 "$default_value" \
+                         3>&1 1>&2 2>&3) || msg_error "Cancelled by user"
+
         input="${input:-$default_value}"
         if [[ "$input" =~ ^[0-9]+$ ]] && (( input >= min && input <= max )); then
             printf -v "$varname" '%s' "$input"
             return 0
-        else
-            msg_warn "Please enter a number between $min and $max."
         fi
+        whiptail --backtitle "Proxmox VE Helper Scripts" \
+                 --title "INVALID INPUT" \
+                 --msgbox "Please enter a number between $min and $max." 8 58
     done
 }
 
@@ -276,7 +310,7 @@ check_proxmox() {
 check_dependencies() {
     local missing=()
 
-    for cmd in ssh scp wget lsusb nc; do
+    for cmd in ssh scp wget lsusb nc whiptail; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -317,19 +351,18 @@ collect_vm_config() {
     local storage_pools=()
     local storage_count=0
 
-    # Get next available VM ID
     VM_ID=$(get_next_vmid)
     prompt_integer VM_ID "VM ID" "$VM_ID" 100 999999999
 
     while ! validate_vmid "$VM_ID"; do
-        msg_warn "VM ID $VM_ID is already in use"
+        whiptail --backtitle "Proxmox VE Helper Scripts" \
+                 --title "VM ID IN USE" \
+                 --msgbox "VM ID $VM_ID is already in use. Please choose another." 8 58
         prompt_integer VM_ID "VM ID" "$((VM_ID + 1))" 100 999999999
     done
 
-    # VM Name
-    prompt_default VM_NAME "VM Hostname" "nut-server"
+    prompt_default VM_NAME "VM Hostname" "nut-server" "VM HOSTNAME"
 
-    # Storage pool
     mapfile -t storage_pools < <(list_storage_pools)
     storage_count=${#storage_pools[@]}
 
@@ -337,57 +370,30 @@ collect_vm_config() {
         msg_error "No storage pools found with 'images' content type"
     elif [[ $storage_count -eq 1 ]]; then
         VM_STORAGE="${storage_pools[0]}"
-        msg_info "Using storage pool: $VM_STORAGE"
+        msg_ok "Using storage pool: $VM_STORAGE"
     else
-        echo
-        echo "Available storage pools:"
-        local i
-        for i in "${!storage_pools[@]}"; do
-            echo "  $((i + 1)). ${storage_pools[$i]}"
-        done
         local storage_idx
-        prompt_menu storage_idx "Select storage pool:" "${storage_pools[@]}"
+        prompt_menu storage_idx "SELECT STORAGE POOL" "${storage_pools[@]}"
         VM_STORAGE="${storage_pools[$storage_idx]}"
     fi
 
-    # Network bridge
     VM_BRIDGE="vmbr0"
-    prompt_default VM_BRIDGE "Network bridge" "$VM_BRIDGE"
+    prompt_default VM_BRIDGE "Network bridge" "$VM_BRIDGE" "NETWORK BRIDGE"
 
     while ! validate_bridge "$VM_BRIDGE"; do
-        msg_warn "Bridge '$VM_BRIDGE' does not exist"
-        prompt_default VM_BRIDGE "Network bridge" "vmbr0"
+        whiptail --backtitle "Proxmox VE Helper Scripts" \
+                 --title "INVALID BRIDGE" \
+                 --msgbox "Bridge '$VM_BRIDGE' does not exist. Please try again." 8 58
+        prompt_default VM_BRIDGE "Network bridge" "vmbr0" "NETWORK BRIDGE"
     done
 
-    # RAM
     prompt_integer VM_RAM "RAM (MB)" "1024" 256 131072
-
-    # CPU cores
     prompt_integer VM_CORES "CPU cores" "1" 1 128
-
-    # Disk size
     prompt_integer VM_DISK_GB "Disk size (GB)" "8" 4 10240
-
-    # VM user
-    prompt_default VM_USER "VM username" "ubuntu"
-
-    # VM password
+    prompt_default VM_USER "VM username" "ubuntu" "VM USER"
     prompt_password VM_PASSWORD "VM password"
 
-    # Confirmation
-    echo
-    echo -e "${C_BOLD}VM Configuration Summary:${C_RESET}"
-    echo "  VM ID:        $VM_ID"
-    echo "  Hostname:     $VM_NAME"
-    echo "  Storage:      $VM_STORAGE"
-    echo "  Bridge:       $VM_BRIDGE"
-    echo "  RAM:          ${VM_RAM} MB"
-    echo "  CPU cores:    $VM_CORES"
-    echo "  Disk size:    ${VM_DISK_GB} GB"
-    echo "  Username:     $VM_USER"
-    echo
-
-    if ! prompt_yes_no "Proceed with VM creation?" "y"; then
+    if ! prompt_yes_no "VM Configuration:\n\n  VM ID:     $VM_ID\n  Hostname:  $VM_NAME\n  Storage:   $VM_STORAGE\n  Bridge:    $VM_BRIDGE\n  RAM:       ${VM_RAM} MB\n  Cores:     $VM_CORES\n  Disk:      ${VM_DISK_GB} GB\n  Username:  $VM_USER\n\nProceed with VM creation?" "y" "VM CONFIGURATION SUMMARY"; then
         msg_error "Aborted by user"
     fi
 }
@@ -397,32 +403,18 @@ collect_vm_config() {
 #===============================================================================
 
 collect_nut_config() {
-    # UPS name and description
-    prompt_default NUT_UPS_NAME "UPS name (identifier)" "ups"
-    prompt_default NUT_UPS_DESC "UPS description" "My UPS"
-
-    # Driver selection
-    echo
-    echo "Select NUT driver:"
-    local sorted_keys=($(echo "${!UPS_DRIVERS[@]}" | tr ' ' '\n' | sort -n))
-    for key in "${sorted_keys[@]}"; do
-        echo "  $key. ${DRIVER_DESCS[$key]}"
-    done
+    prompt_default NUT_UPS_NAME "UPS name (identifier)" "ups" "UPS NAME"
+    prompt_default NUT_UPS_DESC "UPS description" "My UPS" "UPS DESCRIPTION"
 
     local driver_choice
-    prompt_menu driver_choice "Select driver:" "${DRIVER_DESCS[1]}" "${DRIVER_DESCS[2]}" "${DRIVER_DESCS[3]}"
+    prompt_menu driver_choice "SELECT NUT DRIVER" "${DRIVER_DESCS[1]}" "${DRIVER_DESCS[2]}" "${DRIVER_DESCS[3]}"
     NUT_DRIVER="${UPS_DRIVERS[$((driver_choice + 1))]}"
 
-    # Admin user
-    prompt_default NUT_ADMIN_USER "NUT admin username" "admin"
+    prompt_default NUT_ADMIN_USER "NUT admin username" "admin" "NUT ADMIN USER"
     prompt_password NUT_ADMIN_PASS "NUT admin password"
-
-    # Monitor user
-    prompt_default NUT_MONITOR_USER "NUT monitor username" "monuser"
+    prompt_default NUT_MONITOR_USER "NUT monitor username" "monuser" "NUT MONITOR USER"
     prompt_password NUT_MONITOR_PASS "NUT monitor password"
-
-    # Listen address and port
-    prompt_default NUT_LISTEN_ADDR "NUT listen address" "0.0.0.0"
+    prompt_default NUT_LISTEN_ADDR "NUT listen address" "0.0.0.0" "NUT LISTEN ADDRESS"
     prompt_integer NUT_LISTEN_PORT "NUT listen port" "3493" 1 65535
 }
 
@@ -434,54 +426,41 @@ download_cloud_image() {
     local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
 
     if [[ -f "$img_path" ]]; then
-        msg_info "Cloud image already exists, using cached version"
+        msg_ok "Using cached Ubuntu 24.04 cloud image"
         return 0
     fi
 
-    msg_info "Downloading Ubuntu 24.04 cloud image..."
+    msg_info "Downloading Ubuntu 24.04 cloud image"
     mkdir -p "$IMG_CACHE_DIR"
-
-    spinner_start "Downloading Ubuntu 24.04 cloud image..."
 
     if command -v wget &>/dev/null; then
         if ! wget -q -c -O "$img_path.tmp" "$UBUNTU_IMG_URL" 2>/dev/null; then
-            spinner_stop
             msg_error "Failed to download cloud image"
         fi
     elif command -v curl &>/dev/null; then
         if ! curl -sL --continue-at - -o "$img_path.tmp" "$UBUNTU_IMG_URL" 2>/dev/null; then
-            spinner_stop
             msg_error "Failed to download cloud image"
         fi
     else
-        spinner_stop
         msg_error "Neither wget nor curl is available"
     fi
 
-    spinner_stop
     mv "$img_path.tmp" "$img_path"
-    msg_ok "Cloud image downloaded"
+    msg_ok "Downloaded Ubuntu 24.04 cloud image"
 }
 
 inject_ssh_key() {
     TEMP_KEY_DIR="/tmp/nut-setup-$$"
     mkdir -p "$TEMP_KEY_DIR"
 
-    # Generate temp SSH keypair
     ssh-keygen -t ed25519 -f "$TEMP_KEY_DIR/nut-setup-key" -N "" -C "nut-setup-temp" &>/dev/null
 
     TEMP_SSH_KEY="$TEMP_KEY_DIR/nut-setup-key"
     TEMP_SSH_PUB="$TEMP_KEY_DIR/nut-setup-key.pub"
 
-    # Register cleanup trap
     cleanup_temp_keys() {
-        if [[ -d "$TEMP_KEY_DIR" ]]; then
-            rm -rf "$TEMP_KEY_DIR"
-        fi
-        # Also cleanup cloud-init snippet if it exists
-        if [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]]; then
-            rm -f "$CLOUDINIT_SNIPPET"
-        fi
+        [[ -d "$TEMP_KEY_DIR" ]] && rm -rf "$TEMP_KEY_DIR"
+        [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]] && rm -f "$CLOUDINIT_SNIPPET"
     }
     trap cleanup_temp_keys EXIT
 
@@ -491,7 +470,18 @@ inject_ssh_key() {
 generate_cloudinit_snippet() {
     local snippet_path="/var/lib/vz/snippets/nut-vm-${VM_ID}-cloudinit.yaml"
 
-    # Create snippets directory if it doesn't exist
+    # Proxmox requires 'snippets' content type on the storage or it rejects the
+    # volume reference at VM start with "volume does not exist".
+    local cfg_content
+    cfg_content=$(awk '/^dir: local/{f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
+    if [[ "$cfg_content" != *snippets* ]]; then
+        if [[ -n "$cfg_content" ]]; then
+            pvesm set local --content "${cfg_content},snippets" &>/dev/null || true
+        else
+            pvesm set local --content "vztmpl,iso,backup,snippets" &>/dev/null || true
+        fi
+    fi
+
     mkdir -p "/var/lib/vz/snippets"
 
     cat > "$snippet_path" << 'EOF'
@@ -504,19 +494,16 @@ runcmd:
 EOF
 
     CLOUDINIT_SNIPPET="$snippet_path"
-    msg_ok "Generated cloud-init snippet for qemu-guest-agent"
+    msg_ok "Generated cloud-init snippet"
 }
 
 create_vm() {
     local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
 
-    # Generate cloud-init snippet first (required for guest agent installation)
     generate_cloudinit_snippet
 
-    msg_info "Creating VM $VM_ID..."
-    spinner_start "Creating VM..."
+    msg_info "Creating VM $VM_ID"
 
-    # Create VM
     if ! qm create "$VM_ID" \
         --name "$VM_NAME" \
         --memory "$VM_RAM" \
@@ -526,27 +513,20 @@ create_vm() {
         --agent "enabled=1" \
         --serial0 socket \
         --vga serial0 &>/dev/null; then
-        spinner_stop
         msg_error "Failed to create VM"
     fi
 
-    spinner_stop
-    msg_ok "VM created"
+    msg_ok "Created VM $VM_ID"
 
-    # Import disk
-    msg_info "Importing disk..."
-    spinner_start "Importing disk..."
+    msg_info "Importing disk image"
 
     if ! qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" &>/dev/null; then
-        spinner_stop
         msg_error "Failed to import disk"
     fi
 
-    spinner_stop
-    msg_ok "Disk imported"
+    msg_ok "Imported disk image"
 
-    # Configure VM
-    msg_info "Configuring VM..."
+    msg_info "Configuring VM"
 
     qm set "$VM_ID" --scsihw virtio-scsi-pci &>/dev/null
     qm set "$VM_ID" --scsi0 "${VM_STORAGE}:vm-${VM_ID}-disk-0" &>/dev/null
@@ -557,8 +537,6 @@ create_vm() {
     qm set "$VM_ID" --ciuser "$VM_USER" &>/dev/null
     qm set "$VM_ID" --cipassword "$VM_PASSWORD" &>/dev/null
     qm set "$VM_ID" --sshkeys "$TEMP_SSH_PUB" &>/dev/null
-
-    # Attach custom cloud-init snippet for qemu-guest-agent installation
     qm set "$VM_ID" --cicustom "vendor=local:snippets/nut-vm-${VM_ID}-cloudinit.yaml" &>/dev/null
 
     VM_CREATED=true
@@ -570,32 +548,40 @@ create_vm() {
 #===============================================================================
 
 detect_ups() {
-    msg_info "Detecting USB UPS devices..."
-
-    local usb_devices=()
-    local device_info=()
-    local i=0
-
-    # Check if lsusb is available
     if ! command -v lsusb &>/dev/null; then
-        msg_warn "lsusb not found - USB detection unavailable"
-        msg_info "You can still configure USB passthrough manually"
-        if prompt_yes_no "Enter UPS vendor:product manually?" "n"; then
-            read -rp "Enter UPS vendor:product (e.g., 051d:0002): " UPS_VENDOR_PRODUCT
+        msg_warn "lsusb not found — USB detection unavailable"
+        if whiptail --backtitle "Proxmox VE Helper Scripts" \
+                    --title "USB DETECTION" \
+                    --yesno "lsusb not available. Enter UPS vendor:product manually?" 8 58; then
+            UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                                          --title "UPS DEVICE" \
+                                          --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
+                                          8 58 "" 3>&1 1>&2 2>&3) || true
         fi
         return
     fi
 
-    # Parse lsusb output with timeout to prevent hanging
+    msg_info "Scanning for USB UPS devices"
+
     local lsusb_output
     lsusb_output=$(timeout 10 lsusb 2>/dev/null) || {
-        msg_warn "USB device detection timed out (lsusb hung)"
-        msg_info "This can happen with certain USB controllers"
-        if prompt_yes_no "Enter UPS vendor:product manually?" "n"; then
-            read -rp "Enter UPS vendor:product (e.g., 051d:0002): " UPS_VENDOR_PRODUCT
+        msg_warn "USB device detection timed out"
+        if whiptail --backtitle "Proxmox VE Helper Scripts" \
+                    --title "USB TIMEOUT" \
+                    --yesno "lsusb timed out. Enter UPS vendor:product manually?" 8 58; then
+            UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                                          --title "UPS DEVICE" \
+                                          --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
+                                          8 58 "" 3>&1 1>&2 2>&3) || true
         fi
         return
     }
+
+    msg_ok "USB scan complete"
+
+    local usb_devices=()
+    local device_info=()
+    local i=0
 
     while IFS= read -r line; do
         if [[ "$line" =~ Bus[[:space:]]([0-9]+)[[:space:]]Device[[:space:]]([0-9]+).+ID[[:space:]]([0-9a-f]{4}):([0-9a-f]{4})[[:space:]]*(.*) ]]; then
@@ -604,11 +590,8 @@ detect_ups() {
             local vendor="${BASH_REMATCH[3]}"
             local product="${BASH_REMATCH[4]}"
             local name="${BASH_REMATCH[5]}"
-
-            # Check if vendor is in our known list
             local vendor_name="${UPS_VENDORS[$vendor]:-Unknown}"
 
-            # Add to list if it's a known UPS vendor or has UPS-like name
             if [[ -n "${UPS_VENDORS[$vendor]:-}" ]] || [[ "$name" =~ [Uu][Pp][Ss] ]]; then
                 usb_devices+=("$vendor:$product")
                 device_info+=("Bus $bus Device $device - $vendor_name ($vendor:$product) - $name")
@@ -621,43 +604,37 @@ detect_ups() {
 
     if [[ $UPS_DEVICE_COUNT -eq 0 ]]; then
         msg_warn "No USB UPS devices detected"
-        if prompt_yes_no "Enter UPS vendor:product manually?" "n"; then
-            read -rp "Enter UPS vendor:product (e.g., 051d:0002): " UPS_VENDOR_PRODUCT
+        if whiptail --backtitle "Proxmox VE Helper Scripts" \
+                    --title "NO UPS FOUND" \
+                    --yesno "No UPS devices found. Enter vendor:product manually?" 8 58; then
+            UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                                          --title "UPS DEVICE" \
+                                          --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
+                                          8 58 "" 3>&1 1>&2 2>&3) || true
         fi
         return
     elif [[ $UPS_DEVICE_COUNT -eq 1 ]]; then
-        msg_info "Found 1 UPS device: ${device_info[0]}"
-        if prompt_yes_no "Use this device?" "y"; then
+        if whiptail --backtitle "Proxmox VE Helper Scripts" \
+                    --title "UPS DETECTED" \
+                    --yesno "Use this device?\n\n${device_info[0]}" 10 70; then
             UPS_VENDOR_PRODUCT="${usb_devices[0]}"
             UPS_BUS_PORT=""
         fi
     else
-        echo
-        echo "Multiple UPS devices found:"
-        local idx
-        for idx in "${!device_info[@]}"; do
-            echo "  $((idx + 1)). ${device_info[$idx]}"
-        done
-
         local choice
-        prompt_menu choice "Select UPS device:" "${device_info[@]}"
+        prompt_menu choice "SELECT UPS DEVICE" "${device_info[@]}"
         UPS_VENDOR_PRODUCT="${usb_devices[$choice]}"
 
-        # Check for duplicates
         local duplicates=0
         local dev
         for dev in "${usb_devices[@]}"; do
-            if [[ "$dev" == "$UPS_VENDOR_PRODUCT" ]]; then
-                ((++duplicates))
-            fi
+            [[ "$dev" == "$UPS_VENDOR_PRODUCT" ]] && ((++duplicates))
         done
 
         if [[ $duplicates -gt 1 ]]; then
-            msg_warn "Multiple devices with same ID detected, using bus-port notation"
-            # Extract bus from selected device info
+            msg_warn "Multiple devices with same ID — using bus-port notation"
             if [[ "${device_info[$choice]}" =~ Bus[[:space:]]([0-9]+) ]]; then
-                local bus="${BASH_REMATCH[1]}"
-                UPS_BUS_PORT="$bus-1"
+                UPS_BUS_PORT="${BASH_REMATCH[1]}-1"
             fi
         fi
     fi
@@ -669,7 +646,7 @@ setup_usb_passthrough() {
         return
     fi
 
-    msg_info "Setting up USB passthrough for $UPS_VENDOR_PRODUCT..."
+    msg_info "Setting up USB passthrough for $UPS_VENDOR_PRODUCT"
 
     local usb_param
     if [[ -n "${UPS_BUS_PORT:-}" ]]; then
@@ -690,7 +667,7 @@ setup_usb_passthrough() {
 #===============================================================================
 
 start_vm() {
-    msg_info "Starting VM $VM_ID..."
+    msg_info "Starting VM $VM_ID"
 
     if ! qm start "$VM_ID" &>/dev/null; then
         msg_error "Failed to start VM"
@@ -705,26 +682,22 @@ wait_ssh() {
     local timeout="${3:-$SSH_TIMEOUT}"
     local elapsed=0
 
-    msg_info "Waiting for SSH on $host:$port..."
-    spinner_start "Waiting for SSH..."
+    msg_info "Waiting for SSH on $host:$port"
 
     while [[ $elapsed -lt $timeout ]]; do
         if nc -z -w 2 "$host" "$port" 2>/dev/null; then
-            spinner_stop
-            msg_ok "SSH is available"
+            msg_ok "SSH is available on $host"
             return 0
         fi
         sleep "$SSH_POLL_INTERVAL"
         elapsed=$((elapsed + SSH_POLL_INTERVAL))
     done
 
-    spinner_stop
     msg_error "SSH connection timed out after ${timeout}s"
 }
 
 get_vm_ip() {
-    msg_info "Getting VM IP address..."
-    spinner_start "Waiting for guest agent..."
+    msg_info "Waiting for guest agent to report VM IP"
 
     local elapsed=0
     local max_wait=120
@@ -749,7 +722,6 @@ except:
 " 2>/dev/null || true)
 
         if [[ -n "$ip" ]]; then
-            spinner_stop
             VM_IP="$ip"
             msg_ok "VM IP address: $VM_IP"
             return 0
@@ -759,9 +731,11 @@ except:
         elapsed=$((elapsed + 5))
     done
 
-    spinner_stop
     msg_warn "Could not get IP from guest agent"
-    read -rp "Enter VM IP address manually: " VM_IP
+    VM_IP=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+                     --title "VM IP ADDRESS" \
+                     --inputbox "Enter VM IP address manually:" \
+                     8 58 "" 3>&1 1>&2 2>&3) || msg_error "No IP address provided"
 
     if [[ -z "$VM_IP" ]]; then
         msg_error "No IP address provided"
@@ -774,10 +748,9 @@ except:
 
 build_nut_install_script() {
     NUT_INSTALL_SCRIPT=$(cat <<'NUT_SCRIPT'
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-# Export variables for config file generation
 UPS_NAME="__UPS_NAME__"
 UPS_DESC="__UPS_DESC__"
 DRIVER="__DRIVER__"
@@ -789,10 +762,10 @@ LISTEN_ADDR="__LISTEN_ADDR__"
 LISTEN_PORT="__LISTEN_PORT__"
 
 echo "[NUT-INSTALL] Updating packages..."
-apt-get update -qq
+apt-get update -qq >/dev/null 2>&1
 
 echo "[NUT-INSTALL] Installing NUT packages..."
-apt-get install -y -qq nut-server nut-client usbutils
+apt-get install -y -qq nut-server nut-client usbutils >/dev/null 2>&1
 
 echo "[NUT-INSTALL] Waiting for UPS device..."
 for i in {1..12}; do
@@ -808,12 +781,10 @@ done
 
 echo "[NUT-INSTALL] Configuring NUT..."
 
-# nut.conf
 cat > /etc/nut/nut.conf <<EOF
 MODE=netserver
 EOF
 
-# ups.conf
 cat > /etc/nut/ups.conf <<EOF
 [${UPS_NAME}]
   driver = ${DRIVER}
@@ -822,14 +793,12 @@ cat > /etc/nut/ups.conf <<EOF
   pollinterval = 2
 EOF
 
-# upsd.conf
 cat > /etc/nut/upsd.conf <<EOF
 LISTEN ${LISTEN_ADDR} ${LISTEN_PORT}
 MAXAGE 15
 STATEPATH /var/run/nut
 EOF
 
-# upsd.users
 cat > /etc/nut/upsd.users <<EOF
 [${ADMIN_USER}]
   password = ${ADMIN_PASS}
@@ -841,7 +810,6 @@ cat > /etc/nut/upsd.users <<EOF
   upsmon master
 EOF
 
-# upsmon.conf
 cat > /etc/nut/upsmon.conf <<EOF
 MONITOR ${UPS_NAME}@localhost:${LISTEN_PORT} 1 ${MONITOR_USER} ${MONITOR_PASS} master
 
@@ -868,24 +836,19 @@ NOCOMMWARNTIME 300
 FINALDELAY 5
 EOF
 
-# Set permissions
 echo "[NUT-INSTALL] Setting permissions..."
 chown root:nut /etc/nut/*.conf
 chmod 640 /etc/nut/*.conf
 
-# Create state directory
 mkdir -p /var/run/nut
 chown nut:nut /var/run/nut
 
-# Enable and start services
 echo "[NUT-INSTALL] Starting NUT services..."
-systemctl enable nut-server nut-monitor
-systemctl restart nut-server nut-monitor
+systemctl enable nut-server nut-monitor >/dev/null 2>&1
+systemctl restart nut-server nut-monitor >/dev/null 2>&1
 
-# Wait for services
 sleep 5
 
-# Test NUT
 echo "[NUT-INSTALL] Testing NUT connection..."
 if upsc "${UPS_NAME}@localhost" &>/dev/null; then
     echo "NUT_TEST_OK"
@@ -897,7 +860,6 @@ echo "[NUT-INSTALL] Complete!"
 NUT_SCRIPT
 )
 
-    # Substitute variables
     NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__UPS_NAME__/$NUT_UPS_NAME}"
     NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__UPS_DESC__/$NUT_UPS_DESC}"
     NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__DRIVER__/$NUT_DRIVER}"
@@ -912,13 +874,10 @@ NUT_SCRIPT
 deploy_nut_script() {
     local remote_script_path="/tmp/nut-install.sh"
 
-    msg_info "Deploying NUT install script to VM..."
-    spinner_start "Copying install script..."
+    msg_info "Deploying NUT install script to VM"
 
-    # Wait a bit for cloud-init to finish
     sleep 20
 
-    # Copy script to VM
     local retry_count=0
     local max_retries=5
 
@@ -938,16 +897,12 @@ deploy_nut_script() {
     done
 
     if [[ $retry_count -eq $max_retries ]]; then
-        spinner_stop
         msg_error "Failed to copy install script to VM"
     fi
 
-    spinner_stop
-    msg_ok "Install script copied"
+    msg_ok "Install script deployed"
 
-    # Execute script
-    msg_info "Running NUT install script on VM (this may take a few minutes)..."
-    spinner_start "Installing NUT..."
+    msg_info "Running NUT installer on VM (this may take a few minutes)"
 
     NUT_INSTALL_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
@@ -959,18 +914,14 @@ deploy_nut_script() {
         "${VM_USER}@${VM_IP}" \
         "sudo bash $remote_script_path" 2>&1) || true
 
-    spinner_stop
-
-    # Check for test result
     if echo "$NUT_INSTALL_OUTPUT" | grep -q "NUT_TEST_OK"; then
         NUT_TEST_RESULT="OK"
-        msg_ok "NUT installation and test successful"
+        msg_ok "NUT installed and tested successfully"
     else
         NUT_TEST_RESULT="FAIL"
         msg_warn "NUT test failed (check driver compatibility)"
     fi
 
-    # Cleanup remote script
     ssh -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
         -o GSSAPIAuthentication=no \
@@ -978,6 +929,8 @@ deploy_nut_script() {
         -i "$TEMP_SSH_KEY" \
         "${VM_USER}@${VM_IP}" \
         "rm -f $remote_script_path" 2>/dev/null || true
+
+    msg_ok "NUT installation complete"
 }
 
 run_nut_install() {
@@ -990,46 +943,47 @@ run_nut_install() {
 #===============================================================================
 
 print_summary() {
-    local width=60
-
-    echo
-    echo -e "${C_BOLD}╔$(printf '═%.0s' $(seq 1 $width))╗${C_RESET}"
-    printf "${C_BOLD}║%$(( (width - 25) / 2 ))s%s%$(( (width - 25) / 2 ))s║${C_RESET}\n" "" "NUT VM Setup - Complete!" ""
-    echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
-    printf "${C_BOLD}║${C_RESET}  VM ID:          %-42s${C_BOLD}║${C_RESET}\n" "$VM_ID"
-    printf "${C_BOLD}║${C_RESET}  VM Name:        %-42s${C_BOLD}║${C_RESET}\n" "$VM_NAME"
-    printf "${C_BOLD}║${C_RESET}  VM IP:          %-42s${C_BOLD}║${C_RESET}\n" "$VM_IP"
-    echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
-    printf "${C_BOLD}║${C_RESET}  NUT Server:     %-42s${C_BOLD}║${C_RESET}\n" "${VM_IP}:${NUT_LISTEN_PORT}"
-    printf "${C_BOLD}║${C_RESET}  UPS Name:       %-42s${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME"
-    echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
-    printf "${C_BOLD}║${C_RESET}  Test command:                             ${C_BOLD}║${C_RESET}\n"
-    printf "${C_BOLD}║${C_RESET}    upsc %s@${VM_IP}                ${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME"
-    echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
-
-    # Show auto-generated passwords if applicable
-    if [[ "$AUTO_GENERATE_PASSWORDS" == "true" && ${#GENERATED_PASSWORDS[@]} -gt 0 ]]; then
-        echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
-        printf "${C_BOLD}║${C_RESET}  ${C_BOLD}${C_WARN}AUTO-GENERATED PASSWORDS (SAVE THESE!):${C_RESET}     ${C_BOLD}║${C_RESET}\n"
-        echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
-        for pwd_entry in "${GENERATED_PASSWORDS[@]}"; do
-            printf "${C_BOLD}║${C_RESET}    %s${C_BOLD}║${C_RESET}\n" "$(printf '%-56s' "$pwd_entry")"
-        done
-        echo -e "${C_BOLD}║%-${width}s║${C_RESET}" ""
-        printf "${C_BOLD}║${C_RESET}  ${C_INFO}IMPORTANT: Store these passwords securely!${C_RESET}  ${C_BOLD}║${C_RESET}\n"
-        echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
-    fi
-
-    printf "${C_BOLD}║${C_RESET}  Client upsmon.conf snippet:               ${C_BOLD}║${C_RESET}\n"
-    printf "${C_BOLD}║${C_RESET}  MONITOR %s@%s:${NUT_LISTEN_PORT} 1 %s PASS slave  ${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME" "$VM_IP" "$NUT_MONITOR_USER"
+    local summary_text
+    summary_text="NUT VM Setup Complete!\n\n"
+    summary_text+="  VM ID:      $VM_ID\n"
+    summary_text+="  VM Name:    $VM_NAME\n"
+    summary_text+="  VM IP:      $VM_IP\n\n"
+    summary_text+="  NUT Server: ${VM_IP}:${NUT_LISTEN_PORT}\n"
+    summary_text+="  UPS Name:   $NUT_UPS_NAME\n\n"
+    summary_text+="  Test command:\n"
+    summary_text+="    upsc ${NUT_UPS_NAME}@${VM_IP}\n\n"
+    summary_text+="  Client upsmon.conf:\n"
+    summary_text+="    MONITOR ${NUT_UPS_NAME}@${VM_IP}:${NUT_LISTEN_PORT} 1 ${NUT_MONITOR_USER} PASS slave"
 
     if [[ "$NUT_TEST_RESULT" == "FAIL" ]]; then
-        echo -e "${C_BOLD}╠$(printf '═%.0s' $(seq 1 $width))╣${C_RESET}"
-        printf "${C_BOLD}║${C_RESET}  ${C_WARN}NOTE: NUT test failed - check driver selection${C_RESET}           ${C_BOLD}║${C_RESET}\n"
-        printf "${C_BOLD}║${C_RESET}  ${C_INFO}Try: upsc %s@%s to troubleshoot${C_RESET}             ${C_BOLD}║${C_RESET}\n" "$NUT_UPS_NAME" "$VM_IP"
+        summary_text+="\n\n⚠ NUT test failed — check driver selection\n"
+        summary_text+="  Try: upsc ${NUT_UPS_NAME}@${VM_IP}"
     fi
 
-    echo -e "${C_BOLD}╚$(printf '═%.0s' $(seq 1 $width))╝${C_RESET}"
+    if [[ "$AUTO_GENERATE_PASSWORDS" == "true" && ${#GENERATED_PASSWORDS[@]} -gt 0 ]]; then
+        summary_text+="\n\n⚠ AUTO-GENERATED PASSWORDS (save these!):\n"
+        for pwd_entry in "${GENERATED_PASSWORDS[@]}"; do
+            summary_text+="  $pwd_entry\n"
+        done
+    fi
+
+    whiptail --backtitle "Proxmox VE Helper Scripts" \
+             --title "SETUP COMPLETE" \
+             --msgbox "$summary_text" 24 72
+
+    echo
+    echo -e "${GN}${CM}NUT VM setup completed successfully!${CL}"
+    echo -e "${INFO}${YW}VM IP:      ${BGN}${VM_IP}${CL}"
+    echo -e "${INFO}${YW}NUT Server: ${BGN}${VM_IP}:${NUT_LISTEN_PORT}${CL}"
+    echo -e "${INFO}${YW}Test with:  ${BGN}upsc ${NUT_UPS_NAME}@${VM_IP}${CL}"
+
+    if [[ "$AUTO_GENERATE_PASSWORDS" == "true" && ${#GENERATED_PASSWORDS[@]} -gt 0 ]]; then
+        echo
+        echo -e "${YW}⚠ Auto-generated passwords:${CL}"
+        for pwd_entry in "${GENERATED_PASSWORDS[@]}"; do
+            echo -e "  ${DGN}${pwd_entry}${CL}"
+        done
+    fi
     echo
 }
 
@@ -1038,7 +992,6 @@ print_summary() {
 #===============================================================================
 
 main() {
-    # Parse CLI flags
     case "${1:-}" in
         --help|-h)
             echo "Usage: $0 [--version|--help]"
@@ -1048,6 +1001,9 @@ main() {
             echo "Options:"
             echo "  --help, -h      Show this help message"
             echo "  --version       Show version"
+            echo
+            echo "Environment:"
+            echo "  VERBOSE=yes     Show full command output"
             exit 0
             ;;
         --version)
@@ -1056,73 +1012,47 @@ main() {
             ;;
     esac
 
-    msg_header "Proxmox NUT Server VM Setup"
+    catch_errors
 
-    # Prerequisite checks
+    header_info
+    echo -e "${BOLD}  v${SCRIPT_VERSION}${CL}\n"
+
     check_root
     check_proxmox
     check_dependencies
 
-    # Generate SSH keys early for cleanup trap
     inject_ssh_key
 
-    # Collect configuration
     prompt_autogenerate_passwords
     collect_vm_config
     collect_nut_config
 
-    # Print summary before proceeding
-    echo
-    echo -e "${C_BOLD}NUT Configuration Summary:${C_RESET}"
-    echo "  UPS Name:        $NUT_UPS_NAME"
-    echo "  UPS Description: $NUT_UPS_DESC"
-    echo "  Driver:          $NUT_DRIVER"
-    echo "  Admin User:      $NUT_ADMIN_USER"
-    echo "  Monitor User:    $NUT_MONITOR_USER"
-    echo "  Listen Address:  $NUT_LISTEN_ADDR:$NUT_LISTEN_PORT"
-    echo
-
-    if ! prompt_yes_no "Proceed with VM and NUT setup?" "y"; then
+    if ! prompt_yes_no "NUT Configuration:\n\n  UPS Name:     $NUT_UPS_NAME\n  UPS Desc:     $NUT_UPS_DESC\n  Driver:       $NUT_DRIVER\n  Admin User:   $NUT_ADMIN_USER\n  Monitor User: $NUT_MONITOR_USER\n  Listen:       $NUT_LISTEN_ADDR:$NUT_LISTEN_PORT\n\nProceed with VM and NUT setup?" "y" "NUT CONFIGURATION SUMMARY"; then
         msg_error "Aborted by user"
     fi
 
-    # Download cloud image
     download_cloud_image
-
-    # Create VM
     create_vm
-
-    # Detect and setup USB passthrough
     detect_ups
     setup_usb_passthrough
-
-    # Start VM
     start_vm
 
-    # Give VM time to boot before attempting SSH connections
-    msg_info "Waiting ${VM_START_DELAY}s for VM to initialize..."
+    msg_info "Waiting ${VM_START_DELAY}s for VM to initialize"
     local remaining="$VM_START_DELAY"
     while [[ $remaining -gt 0 ]]; do
-        printf "\r${C_INFO}[WAIT]${C_RESET} %2d seconds remaining..." "$remaining"
+        printf "\r${YW}  ⏳${CL} %2d seconds remaining..." "$remaining"
         sleep 1
         ((remaining--))
     done
     echo
+    msg_ok "VM initialization wait complete"
 
-    # Get VM IP (must happen before wait_ssh)
     get_vm_ip
-
-    # Wait for SSH
     wait_ssh "$VM_IP" 22
-
-    # Install NUT
     run_nut_install
-
-    # Print final summary
     print_summary
 }
 
-# Handle interrupts
-trap 'msg_error "Interrupted by user"' INT TERM
+trap '[[ -n "$SPINNER_PID" ]] && kill "$SPINNER_PID" 2>/dev/null; printf "\e[?25h"; echo -e "\n${RD}Interrupted${CL}"; exit 130' INT TERM
 
 main "$@"
