@@ -310,7 +310,7 @@ check_proxmox() {
 check_dependencies() {
     local missing=()
 
-    for cmd in ssh scp wget lsusb nc whiptail; do
+    for cmd in ssh scp wget lsusb whiptail; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -686,7 +686,7 @@ wait_ssh() {
     msg_info "Waiting for SSH on $host:$port"
 
     while (( SECONDS - start < timeout )); do
-        if timeout 2 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
+        if timeout 2 bash -c 'echo >/dev/tcp/$1/$2' _ "${host}" "${port}" 2>/dev/null; then
             msg_ok "SSH is available on $host"
             return 0
         fi
