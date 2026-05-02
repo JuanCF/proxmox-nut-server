@@ -79,6 +79,7 @@ spinner() {
 }
 
 msg_info() {
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
     local msg="$1"
     echo -ne "${TAB}${YW}${HOLD}${msg}${HOLD}"
     spinner &
@@ -110,11 +111,11 @@ msg_warn() {
 }
 
 error_handler() {
-    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
-    printf "\e[?25h"
+    local exit_code="$?"
     local line_number="$1"
     local command="$2"
-    local exit_code="$?"
+    [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+    printf "\e[?25h"
     echo -e "\n${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}\n"
 }
 
@@ -747,7 +748,7 @@ except:
 
 build_nut_install_script() {
     NUT_INSTALL_SCRIPT=$(cat <<'NUT_SCRIPT'
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 UPS_NAME="__UPS_NAME__"

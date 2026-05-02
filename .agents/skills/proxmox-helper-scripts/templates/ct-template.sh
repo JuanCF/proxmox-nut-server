@@ -41,13 +41,13 @@ function update_script() {
 
         msg_info "Updating ${APP} to v${RELEASE}"
         systemctl stop appname
-        cd /opt/appname
+        cd /opt/appname || { echo "Failed to change directory to /opt/appname" >&2; exit 1; }
         # TODO: replace with the actual update steps for this app
         wget -q "https://github.com/UPSTREAM_USER/UPSTREAM_REPO/archive/refs/tags/v${RELEASE}.tar.gz"
         tar -xzf "v${RELEASE}.tar.gz" --strip-components=1
         rm -f "v${RELEASE}.tar.gz"
         systemctl start appname
-        echo "${RELEASE}" > /opt/${APP}_version.txt
+        echo "${RELEASE}" > "/opt/${APP}_version.txt"
         msg_ok "Updated ${APP} to v${RELEASE}"
     else
         msg_ok "No update required. ${APP} is already at v${RELEASE}."

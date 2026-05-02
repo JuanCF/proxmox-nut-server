@@ -42,9 +42,11 @@ if [ $exitstatus -ne 0 ]; then
 fi
 ```
 
-The `3>&1 1>&2 2>&3` swap is non-negotiable — whiptail writes the
-result to file descriptor 3, and this redirects it back to stdout
-so command substitution captures it.
+The `3>&1 1>&2 2>&3` swap is non-negotiable — whiptail draws the UI to
+stdout while the user's selection is emitted to stderr (fd 2). The sequence
+saves the original stdout to fd 3 (`3>&1`), redirects stdout to the terminal
+(`1>&2`, swapping with stderr), and redirects stderr into fd 3 (`2>&3`) so
+the command substitution captures the selection.
 
 ## Password input
 

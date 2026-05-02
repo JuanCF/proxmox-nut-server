@@ -449,11 +449,20 @@ get_vm_ip() {
 **Source**: Lines 776-898 from `nut-vm-setup.sh` (the heredoc)
 
 ```bash
-#!/bin/bash
+#!/usr/bin/env bash
 # NUT Installation Script Template
 # Variables are substituted before deployment
 
-set -e
+set -euo pipefail
+
+# Error handler - matches the catch_errors pattern from core-functions
+error_handler() {
+    local exit_code="$?"
+    local line_number="$1"
+    local command="$2"
+    echo -e "\n[ERROR] in line ${line_number}: exit code ${exit_code}: while executing command ${command}\n" >&2
+}
+trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
 
 UPS_NAME="{{UPS_NAME}}"
 UPS_DESC="{{UPS_DESC}}"
@@ -515,12 +524,12 @@ cat > /etc/nut/upsd.users <<EOF
 
 [${MONITOR_USER}]
   password = ${MONITOR_PASS}
-  upsmon master
+  upsmon primary
 EOF
 
 # upsmon.conf
 cat > /etc/nut/upsmon.conf <<EOF
-MONITOR ${UPS_NAME}@localhost:${LISTEN_PORT} 1 ${MONITOR_USER} ${MONITOR_PASS} master
+MONITOR ${UPS_NAME}@localhost:${LISTEN_PORT} 1 ${MONITOR_USER} ${MONITOR_PASS} primary
 
 MINSUPPLIES 1
 SHUTDOWNCMD "/sbin/shutdown -h +0"

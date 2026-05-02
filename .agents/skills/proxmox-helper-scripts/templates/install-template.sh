@@ -43,7 +43,7 @@ RELEASE=$(curl -fsSL https://api.github.com/repos/UPSTREAM_USER/UPSTREAM_REPO/re
           | grep "tag_name" \
           | awk '{print substr($2, 3, length($2)-4)}')
 
-cd /opt
+cd /opt || { msg_error "Failed to change to /opt directory"; exit 1; }
 $STD wget -q "https://github.com/UPSTREAM_USER/UPSTREAM_REPO/archive/refs/tags/v${RELEASE}.tar.gz"
 $STD tar -xzf "v${RELEASE}.tar.gz"
 mv "UPSTREAM_REPO-${RELEASE}" appname
@@ -51,7 +51,7 @@ rm -f "v${RELEASE}.tar.gz"
 
 # TODO: build / configure the app here
 
-echo "${RELEASE}" > /opt/${APPLICATION}_version.txt
+echo "${RELEASE}" > "/opt/${APPLICATION}_version.txt"
 msg_ok "Installed ${APPLICATION}"
 
 # ---- systemd service ----
