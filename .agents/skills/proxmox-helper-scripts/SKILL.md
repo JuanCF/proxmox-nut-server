@@ -1,6 +1,6 @@
 ---
 name: proxmox-helper-scripts
-description: Use this skill when creating, modifying, or reviewing scripts for the community-scripts/ProxmoxVE project (Proxmox VE Helper-Scripts). Triggers on requests involving Proxmox LXC container creation scripts, install scripts using build.func/core.func/install.func, whiptail dialogs in Proxmox style, msg_info/msg_ok/msg_error patterns, _version.txt update tracking, or anything related to the ct/ and install/ folder conventions of the community-scripts ecosystem.
+description: Use this skill when creating, modifying, or reviewing scripts for the community-scripts/ProxmoxVE project. Triggers on: Proxmox LXC container creation scripts; VM creation scripts using qm/QEMU; install scripts using build.func/core.func/install.func; cloud-init VM configuration using cloud-init.func/setup_cloud_init; whiptail dialogs in Proxmox style; msg_info/msg_ok/msg_error patterns; _version.txt update tracking; qcow2/cloud image download and import; or anything related to the ct/, install/, or vm/ folder conventions of the community-scripts ecosystem.
 license: MIT
 ---
 
@@ -41,7 +41,22 @@ Activate this skill whenever the user asks to:
 8. **One PR per fix or feature.** Update the matching JSON metadata file
    in `frontend/public/json/` when behavior changes.
 
+### VM-specific rules
+
+9. **VM scripts live in `vm/`, not `ct/`.** A single file — there is no
+   `install/` counterpart.
+10. **Source `cloud-init.func` alongside `build.func`** for all VM scripts
+    that need cloud-init configuration. Never source `install.func` in a
+    VM script.
+11. **Use `qm`, not `pct`.** All VM lifecycle commands (`qm create`,
+    `qm importdisk`, `qm set`, `qm start`) must use the QEMU manager.
+12. **Do not implement `update_script()`** unless the VM genuinely exposes
+    an in-place upgrade path. VMs manage their own OS updates internally.
+    Never write `/opt/${APP}_version.txt` from a VM script.
+
 ## Workflow when creating a new script
+
+### Container script (LXC)
 
 1. **Read the reference for the relevant subsystem first.** Don't guess
    helper names — load `references/core-functions.md` and confirm.
@@ -59,6 +74,24 @@ Activate this skill whenever the user asks to:
    - `shellcheck script.sh` (lint — install via `apt install shellcheck`)
    - Run on a real Proxmox host (no full simulation possible).
 
+### VM script (QEMU/KVM)
+
+1. **Load `references/vm-scripts.md`** before writing any `qm` code.
+2. **Decide which category applies:**
+   - Pre-built image (HAOS, OPNsense): download a `.qcow2`/`.img` and
+     import as-is. Disable cloud-init (`setup_cloud_init ... "no"`).
+   - Cloud image (Debian, Ubuntu, generic): download a cloud image and
+     use cloud-init for first-boot configuration.
+3. **Start from `templates/vm-template.sh`.** Fill in `APP`, `var_*`,
+   `NSAPP`, the image URL, and cloud-init mode.
+4. **Choose BIOS/machine type:** OVMF + q35 for anything requiring UEFI
+   (HAOS, Windows); SeaBIOS + i440fx for generic Linux. If using OVMF,
+   remember to allocate the EFI disk.
+5. **Do not add `update_script()`** unless the VM exposes a real upgrade
+   path. VMs update themselves through their OS package manager.
+6. **Validate:** `bash -n vm/AppName-vm.sh` + `shellcheck`, then test on
+   a real Proxmox host.
+
 ## Reference index (load on demand)
 
 | File                                     | When to load                                                       |
@@ -67,8 +100,10 @@ Activate this skill whenever the user asks to:
 | `references/whiptail-patterns.md`        | Building interactive dialogs (yes/no, input, menu, checklist)      |
 | `references/version-management.md`       | Implementing `update_script()` or version detection                |
 | `references/script-templates.md`         | Understanding the full anatomy of `ct/` and `install/` scripts     |
+| `references/vm-scripts.md`               | Creating VM scripts: `qm` commands, cloud-init.func, image handling, BIOS/machine types |
 | `templates/ct-template.sh`               | Starting a new container script                                    |
 | `templates/install-template.sh`          | Starting a new install script                                      |
+| `templates/vm-template.sh`               | Starting a new VM script (cloud image or pre-built image)          |
 
 ## Anti-patterns to flag
 
@@ -85,6 +120,18 @@ When reviewing existing code, flag these as requiring a fix:
 - ❌ Custom spinner reimplementation
 - ❌ Not calling `header_info`, `variables`, `color`, `catch_errors` at start
 - ❌ Calling `start` / `build_container` / `description` out of order
+
+**VM-specific anti-patterns:**
+
+- ❌ Using `pct` in a VM script (must be `qm`)
+- ❌ Sourcing `install.func` in a VM script (use `cloud-init.func` instead)
+- ❌ Implementing `update_script()` in a VM script when the VM manages its own updates
+- ❌ Writing `/opt/${APP}_version.txt` from a VM script
+- ❌ Using OVMF (`-bios ovmf`) without allocating an EFI disk (`pvesm alloc … 4M` + `-efidisk0`)
+- ❌ Hardcoding image URLs without verifying a checksum
+- ❌ Leaving the downloaded image file on disk after `qm importdisk` completes
+- ❌ Omitting `-agent 1` from `qm create` (breaks IP detection in the Proxmox UI)
+- ❌ Not detecting architecture when the image ships separate amd64/arm64 assets
 
 ## Style preferences
 
