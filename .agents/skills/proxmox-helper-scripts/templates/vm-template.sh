@@ -49,11 +49,7 @@ function cleanup_vmid() {
 }
 
 function arch_check() {
-  if [ "$(dpkg --print-architecture)" != "amd64" ]; then
-    echo -e "\n ${INFO}${YW}This script will not work with PiMox!\n"
-    echo -e " ${YW}Visit https://github.com/asylumexp/Proxmox for ARM64 support.\n"
-    sleep 2; exit
-  fi
+  ARCH=$(dpkg --print-architecture)
 }
 
 arch_check
@@ -108,13 +104,31 @@ done
 
 # Option B — Cloud image with version from GitHub releases API
 msg_info "Retrieving latest ${APP} image"
-RELEASE=$(curl -fsSL https://api.github.com/repos/TODO_USER/TODO_REPO/releases/latest \
-          | grep "tag_name" \
+RELEASE_JSON=$(curl -fsSL https://api.github.com/repos/TODO_USER/TODO_REPO/releases/latest)
+RELEASE=$(echo "$RELEASE_JSON" | grep "tag_name" \
           | awk '{print substr($2, 3, length($2)-4)}')
-URL="https://github.com/TODO_USER/TODO_REPO/releases/download/${RELEASE}/TODO_APP-${RELEASE}.img"
-# TODO: Adjust the URL pattern to match the upstream release asset naming
+# TODO: Adjust URL patterns for each architecture to match the upstream release asset naming
+case "$ARCH" in
+  amd64) URL="https://github.com/TODO_USER/TODO_REPO/releases/download/${RELEASE}/TODO_APP-${RELEASE}-amd64.img" ;;
+  arm64) URL="https://github.com/TODO_USER/TODO_REPO/releases/download/${RELEASE}/TODO_APP-${RELEASE}-arm64.img" ;;
+  *)     msg_error "Unsupported architecture: ${ARCH}"; exit 1 ;;
+esac
 curl -fSL -o "$(basename "$URL")" "$URL"
 FILE=$(basename "$URL")
+CHECKSUM_URL=$(echo "$RELEASE_JSON" \
+  | grep "browser_download_url" \
+  | grep -iE "sha256|checksum|shasums" \
+  | head -1 \
+  | awk -F '"' '{print $4}')
+if [ -z "$CHECKSUM_URL" ]; then
+  msg_error "No checksum asset found for ${APP} ${RELEASE} — cannot verify download"
+  exit 1
+fi
+msg_info "Verifying ${FILE}"
+curl -fSL -o "$(basename "$CHECKSUM_URL")" "$CHECKSUM_URL"
+sha256sum -c <(grep "$FILE" "$(basename "$CHECKSUM_URL")") \
+  || { msg_error "Checksum verification failed for ${FILE}"; rm -f "$FILE" "$(basename "$CHECKSUM_URL")"; exit 1; }
+rm -f "$(basename "$CHECKSUM_URL")"
 msg_ok "Downloaded ${CL}${BL}${FILE}${CL}"
 
 # TODO: If the image is compressed, decompress it:

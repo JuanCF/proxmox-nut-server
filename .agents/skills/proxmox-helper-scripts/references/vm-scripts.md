@@ -28,7 +28,7 @@ corresponding `install/` counterpart.
 
 ### A) Pre-built image (HAOS, OPNsense, …)
 
-A ready-made disk image (`.qcow2`, `.img`, `.iso`) is downloaded and imported as-is.
+A ready-made disk image (`.qcow2`, `.img`) is downloaded and imported as-is.
 No cloud-init, no post-install configuration. The VM boots into the fully configured OS.
 
 - Call `setup_cloud_init ... "no"` or skip cloud-init entirely.
@@ -43,6 +43,22 @@ The VM receives a user account, SSH keys, network settings, and optionally a sta
 - Source `cloud-init.func` and call `setup_cloud_init` to attach and configure the drive.
 - Works with both DHCP and static IP.
 - Offer an interactive wizard via `configure_cloud_init_interactive`.
+
+### C) ISO installers (installation media)
+
+An `.iso` file is installation media, not a pre-built disk image. The VM boots from the
+ISO into a live installer; the OS install process runs inside the VM and writes the final
+system to an attached blank disk. Cloud-init is not available during installation —
+post-install configuration must be applied by other means (e.g., a cloud-init drive
+added after first boot, Ansible, or manual setup).
+
+- Attach the ISO via `-cdrom` or `-ide2` and create a separate blank disk as the OS
+  installation target.
+- Use q35 + OVMF and allocate an EFI disk when the vendor requires UEFI (e.g.,
+  Windows, Linux distributions with Secure Boot).
+- Always allocate an EFI disk when using OVMF.
+- Remove or detach the ISO after installation completes so the VM boots from the
+  installed disk on subsequent starts.
 
 ## Functions in `misc/cloud-init.func`
 
