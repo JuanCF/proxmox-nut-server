@@ -1,0 +1,3 @@
+# Follow source statements so shellcheck doesn't error on variables
+# defined in sourced build.func / cloud-init.func
+external-sources=true
