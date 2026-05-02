@@ -310,7 +310,7 @@ check_proxmox() {
 check_dependencies() {
     local missing=()
 
-    for cmd in ssh scp wget lsusb nc whiptail; do
+    for cmd in ssh scp wget lsusb whiptail; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -680,20 +680,25 @@ wait_ssh() {
     local host="$1"
     local port="${2:-22}"
     local timeout="${3:-$SSH_TIMEOUT}"
-    local elapsed=0
+    local start=$SECONDS
+    local last_report=0
 
     msg_info "Waiting for SSH on $host:$port"
 
-    while [[ $elapsed -lt $timeout ]]; do
-        if nc -z -w 2 "$host" "$port" 2>/dev/null; then
+    while (( SECONDS - start < timeout )); do
+        if timeout 2 bash -c 'echo >/dev/tcp/$1/$2' _ "${host}" "${port}" 2>/dev/null; then
             msg_ok "SSH is available on $host"
             return 0
         fi
+        local elapsed=$(( SECONDS - start ))
+        if (( elapsed - last_report >= 30 )); then
+            msg_info "Still waiting for SSH on $host:$port (${elapsed}s elapsed)"
+            last_report=$elapsed
+        fi
         sleep "$SSH_POLL_INTERVAL"
-        elapsed=$((elapsed + SSH_POLL_INTERVAL))
     done
 
-    msg_error "SSH connection timed out after ${timeout}s"
+    msg_error "SSH connection timed out after ${timeout}s — verify the VM has network access and SSH is running"
 }
 
 get_vm_ip() {
