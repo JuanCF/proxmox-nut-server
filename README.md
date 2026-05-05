@@ -41,38 +41,38 @@ Other USB UPS devices can be configured manually.
 ### Quick Install (One-Liner)
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm-setup.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm.sh)"
 ```
 
 ### Manual Download
 
 ```bash
 # Download the script
-curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm-setup.sh -o nut-vm-setup.sh
+curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm.sh -o nut-vm.sh
 
 # Or clone the repository
 git clone https://github.com/JuanCF/proxmox-nut-server.git
 cd proxmox-nut-server
 
 # Run from source
-bash src/nut-vm-setup.sh
+bash src/nut-vm.sh
 ```
 
 ## Usage
 
 ```bash
 # Run on Proxmox host as root (from cloned repo)
-bash src/nut-vm-setup.sh
+bash src/nut-vm.sh
 
 # Or if downloaded directly
-bash nut-vm-setup.sh
+bash nut-vm.sh
 ```
 
 ### CLI Options
 
 ```bash
-bash src/nut-vm-setup.sh --help     # Show help
-bash src/nut-vm-setup.sh --version  # Show version
+bash src/nut-vm.sh --help     # Show help
+bash src/nut-vm.sh --version  # Show version
 ```
 
 ### Interactive Prompts
@@ -198,7 +198,7 @@ Proxmox Host
 ├── USB UPS Device
 │   └── USB Passthrough ──┐
 │                         ▼
-├── src/nut-vm-setup.sh  VM (Ubuntu 24.04)
+├── src/nut-vm.sh  VM (Ubuntu 24.04)
 │   ├── Downloads        │   ├── NUT Server
 │   ├── Creates VM ────►│   │   ├── nut-driver (usbhid-ups)
 │   ├── Detects UPS      │   │   ├── upsd (port 3493)
