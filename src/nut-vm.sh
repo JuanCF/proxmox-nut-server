@@ -287,7 +287,7 @@ check_root() {
 check_proxmox() {
   local missing=()
 
-  for cmd in qm pvesh pveversion; do
+  for cmd in qm pvesh pveversion pvesm python3; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
@@ -302,7 +302,7 @@ check_proxmox() {
 check_dependencies() {
   local missing=()
 
-  for cmd in ssh scp wget lsusb whiptail; do
+  for cmd in ssh scp wget lsusb whiptail timeout openssl ssh-keygen ip; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
@@ -624,8 +624,24 @@ detect_ups() {
 
     if [[ $duplicates -gt 1 ]]; then
       msg_warn "Multiple devices with same ID — using bus-port notation"
-      if [[ "${device_info[$choice]}" =~ Bus[[:space:]]([0-9]+) ]]; then
-        UPS_BUS_PORT="${BASH_REMATCH[1]}-1"
+      if [[ "${device_info[$choice]}" =~ Bus[[:space:]]([0-9]+)[[:space:]]Device[[:space:]]([0-9]+) ]]; then
+        local bus="${BASH_REMATCH[1]}"
+        local devnum="${BASH_REMATCH[2]}"
+        local port="1"
+        local sysdev
+        for sysdev in /sys/bus/usb/devices/*/; do
+          local dev_bus dev_num devpath
+          dev_bus=$(cat "${sysdev}busnum" 2>/dev/null) || continue
+          dev_num=$(cat "${sysdev}devnum" 2>/dev/null) || continue
+          if [[ "$((10#$dev_bus))" == "$((10#$bus))" && "$((10#$dev_num))" == "$((10#$devnum))" ]]; then
+            devpath=$(basename "$sysdev")
+            if [[ "$devpath" =~ ^[0-9]+-([0-9]+) ]]; then
+              port="${BASH_REMATCH[1]}"
+            fi
+            break
+          fi
+        done
+        UPS_BUS_PORT="${bus}-${port}"
       fi
     fi
   fi
@@ -877,25 +893,39 @@ deploy_nut_script() {
 
   local retry_count=0
   local max_retries=5
+  local local_script
+  local_script=$(mktemp /tmp/nut-install-XXXXXX.sh)
+  echo "$NUT_INSTALL_SCRIPT" >"$local_script"
 
   while [[ $retry_count -lt $max_retries ]]; do
-    if echo "$NUT_INSTALL_SCRIPT" | ssh -o StrictHostKeyChecking=no \
+    if scp -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null \
       -o ConnectTimeout=10 \
       -o GSSAPIAuthentication=no \
       -o PasswordAuthentication=no \
       -i "$TEMP_SSH_KEY" \
-      "${VM_USER}@${VM_IP}" \
-      "cat > $remote_script_path" 2>/dev/null; then
+      "$local_script" \
+      "${VM_USER}@${VM_IP}:$remote_script_path" 2>/dev/null; then
       break
     fi
     sleep 10
     ((retry_count++))
   done
 
+  rm -f "$local_script"
+
   if [[ $retry_count -eq $max_retries ]]; then
     msg_error "Failed to copy install script to VM"
   fi
+
+  ssh -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 \
+    -o GSSAPIAuthentication=no \
+    -o PasswordAuthentication=no \
+    -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" \
+    "chmod +x $remote_script_path" 2>/dev/null || true
 
   msg_ok "Install script deployed"
 
@@ -1004,7 +1034,7 @@ main() {
     exit 0
     ;;
   --version)
-    echo "nut-vm-setup v${SCRIPT_VERSION}"
+    echo "nut-vm.sh v${SCRIPT_VERSION}"
     exit 0
     ;;
   esac
