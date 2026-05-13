@@ -1,4 +1,4 @@
-SHELL_FILES := $(shell find src/ -name "*.sh")
+SHELL_FILES := $(shell find vm/ -name "*.sh")
 
 .PHONY: check lint fmt fmt-fix install-tools
 

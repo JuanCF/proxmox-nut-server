@@ -7,6 +7,8 @@
 #
 # Must be run as root on a Proxmox host.
 
+# Consumed by build.func via source on line 18 — shellcheck can’t follow non-constant sources.
+# shellcheck disable=SC2034
 APP="NUT VM"
 var_tags="nut;vm;ups"
 var_cpu="1"
@@ -15,7 +17,10 @@ var_disk="8"
 var_os="ubuntu"
 var_version="24.04"
 
+# These functions are fetched at runtime; shellcheck cannot statically analyze them.
+# shellcheck disable=SC1090
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/build.func)
+# shellcheck disable=SC1090
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/cloud-init.func)
 
 SPINNER_PID=""
@@ -58,6 +63,7 @@ readonly SCRIPT_VERSION="1.0.0"
 
 # UPS Vendor IDs
 # shellcheck disable=SC2034
+# shellcheck disable=SC2080
 readonly -A UPS_VENDORS=(
   ["051d"]="APC"
   ["0764"]="CyberPower"
@@ -370,12 +376,21 @@ collect_nut_config() {
 determine_storage_type() {
   STORAGE_TYPE=$(pvesm status -storage "$VM_STORAGE" | awk 'NR>1 {print $2}')
   case $STORAGE_TYPE in
-    nfs | dir | cifs)
-      DISK_EXT=".qcow2"; DISK_REF_PREFIX="${VM_ID}/"; DISK_IMPORT="-format qcow2";;
-    btrfs)
-      DISK_EXT=".raw"; DISK_REF_PREFIX="${VM_ID}/"; DISK_IMPORT="-format raw";;
-    *)
-      DISK_EXT=""; DISK_REF_PREFIX=""; DISK_IMPORT="-format raw";;
+  nfs | dir | cifs)
+    DISK_EXT=".qcow2"
+    DISK_REF_PREFIX="${VM_ID}/"
+    DISK_IMPORT="-format qcow2"
+    ;;
+  btrfs)
+    DISK_EXT=".raw"
+    DISK_REF_PREFIX="${VM_ID}/"
+    DISK_IMPORT="-format raw"
+    ;;
+  *)
+    DISK_EXT=""
+    DISK_REF_PREFIX=""
+    DISK_IMPORT="-format raw"
+    ;;
   esac
   DISK0="vm-${VM_ID}-disk-0${DISK_EXT}"
   DISK0_REF="${VM_STORAGE}:${DISK_REF_PREFIX}${DISK0}"
@@ -422,7 +437,6 @@ download_cloud_image() {
 
   msg_ok "Downloaded and verified Ubuntu 24.04 cloud image"
 }
-
 
 inject_ssh_key() {
   TEMP_KEY_DIR="/tmp/nut-setup-$$"
@@ -517,7 +531,7 @@ create_vm() {
   msg_ok "Created VM $VM_ID"
 
   msg_info "Importing disk image"
-  if ! $STD qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" $DISK_IMPORT; then
+  if ! $STD qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" "$DISK_IMPORT"; then
     msg_error "Failed to import disk"
   fi
   msg_ok "Imported disk image"
@@ -529,8 +543,9 @@ create_vm() {
   $STD qm set "$VM_ID" --boot c --bootdisk scsi0
 
   # setup_cloud_init generates a random password; override with the user-supplied one.
-  # CLOUDINIT_SSH_KEYS set here so setup_cloud_init injects the temp key instead of
-  # reading from ~/.ssh/authorized_keys.
+  # CLOUDINIT_SSH_KEYS is read by cloud-init.func (sourced on line 19); shellcheck
+  # can’t track usage across non-constant source directives.
+  # shellcheck disable=SC2034
   CLOUDINIT_SSH_KEYS="$TEMP_SSH_PUB"
   setup_cloud_init "$VM_ID" "$VM_STORAGE" "$VM_NAME" "yes" "$VM_USER"
   $STD qm set "$VM_ID" --cipassword "$VM_PASSWORD"
