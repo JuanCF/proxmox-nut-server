@@ -1,127 +1,33 @@
 #!/usr/bin/env bash
 #
-# nut-vm-setup.sh - Proxmox NUT Server VM Setup Script
+# vm/nut-vm.sh - Proxmox NUT Server VM Setup Script
 #
 # Creates an Ubuntu 24.04 VM on Proxmox, configures USB passthrough for UPS,
 # and installs/configures NUT (Network UPS Tools) in netserver mode.
 #
 # Must be run as root on a Proxmox host.
 
-#===============================================================================
-# Section 0: Constants
-#===============================================================================
+APP="NUT VM"
+var_tags="nut;vm;ups"
+var_cpu="1"
+var_ram="1024"
+var_disk="8"
+var_os="ubuntu"
+var_version="24.04"
 
-readonly UBUNTU_IMG_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
-readonly UBUNTU_IMG_NAME="noble-server-cloudimg-amd64.img"
-readonly IMG_CACHE_DIR="/var/lib/vz/template/iso"
-readonly NUT_DEFAULT_PORT=3493
-readonly SSH_TIMEOUT=300
-readonly SSH_POLL_INTERVAL=5
-readonly VM_START_DELAY=120
-readonly SCRIPT_VERSION="1.0.0"
-
-# UPS Vendor IDs
-# shellcheck disable=SC2080
-readonly -A UPS_VENDORS=(
-  ["051d"]="APC"
-  ["0764"]="CyberPower"
-  ["0463"]="Eaton"
-  ["09ae"]="Tripp Lite"
-  ["10af"]="Liebert"
-)
-
-# Driver options
-readonly -A UPS_DRIVERS=(
-  [1]="usbhid-ups"
-  [2]="blazer_usb"
-  [3]="nutdrv_qx"
-)
-
-# Driver descriptions
-readonly -A DRIVER_DESCS=(
-  [1]="usbhid-ups - APC, Eaton, CyberPower (recommended)"
-  [2]="blazer_usb - Generic Megatec/Q1 protocol"
-  [3]="nutdrv_qx - Newer generic USB devices"
-)
-
-#===============================================================================
-# Section 1: Colors, Symbols, and UI Helpers
-#===============================================================================
-
-YW=$'\033[33m'
-YWB=$'\033[93m'
-RD=$'\033[01;31m'
-BGN=$'\033[4;92m'
-GN=$'\033[1;92m'
-DGN=$'\033[32m'
-BOLD=$'\033[1m'
-CL=$'\033[m'
-
-CM="  ✔️  ${CL}"
-CROSS="  ✖️  ${CL}"
-INFO="  💡  ${CL}"
-
-BFR="\\r\\033[K"
-HOLD=" "
-TAB="  "
+source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/build.func)
+source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/cloud-init.func)
 
 SPINNER_PID=""
 
-spinner() {
-  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-  local spin_i=0
-  printf "\e[?25l"
-  while true; do
-    printf "\r ${YWB}%s${CL}" "${frames[spin_i]}"
-    spin_i=$(((spin_i + 1) % ${#frames[@]}))
-    sleep 0.1
-  done
-}
-
-msg_info() {
-  [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
-  local msg="$1"
-  echo -ne "${TAB}${YW}${HOLD}${msg}${HOLD}"
-  spinner &
-  SPINNER_PID=$!
-}
-
-msg_ok() {
-  [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
-  printf "\e[?25h"
-  local msg="$1"
-  echo -e "${BFR}${CM}${GN}${msg}${CL}"
-  SPINNER_PID=""
-}
-
+# build.func's msg_error prints but does not call exit; override to add exit 1
+# so that check_root, check_proxmox, and whiptail cancellations abort the script.
 msg_error() {
-  [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
+  [[ -n "${SPINNER_PID:-}" ]] && ps -p "${SPINNER_PID:-}" &>/dev/null && kill "${SPINNER_PID:-}"
   printf "\e[?25h"
-  local msg="$1"
-  echo -e "${BFR}${CROSS}${RD}${msg}${CL}"
+  echo -e "${BFR}${CROSS}${RD}${1}${CL}"
   SPINNER_PID=""
   exit 1
-}
-
-msg_warn() {
-  [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID" && printf "\e[?25h"
-  SPINNER_PID=""
-  local msg="$1"
-  echo -e "${TAB}${YW}⚠${CL} ${msg}"
-}
-
-error_handler() {
-  local exit_code="$?"
-  local line_number="$1"
-  local command="$2"
-  [[ -n "$SPINNER_PID" ]] && ps -p "$SPINNER_PID" &>/dev/null && kill "$SPINNER_PID"
-  printf "\e[?25h"
-  echo -e "\n${RD}[ERROR]${CL} in line ${RD}$line_number${CL}: exit code ${RD}$exit_code${CL}: while executing command ${YW}$command${CL}\n"
-}
-
-catch_errors() {
-  set -Eeuo pipefail
-  trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
 }
 
 header_info() {
@@ -136,6 +42,41 @@ header_info() {
    Proxmox NUT Server VM Setup
 EOF
 }
+
+#===============================================================================
+# Constants
+#===============================================================================
+
+readonly UBUNTU_IMG_URL="https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img"
+readonly UBUNTU_IMG_CHECKSUM_URL="https://cloud-images.ubuntu.com/minimal/releases/noble/release/SHA256SUMS"
+readonly UBUNTU_IMG_NAME="ubuntu-24.04-minimal-cloudimg-amd64.img"
+readonly IMG_CACHE_DIR="/var/lib/vz/template/iso"
+readonly NUT_DEFAULT_PORT=3493
+readonly SSH_TIMEOUT=300
+readonly SSH_POLL_INTERVAL=5
+readonly SCRIPT_VERSION="1.0.0"
+
+# UPS Vendor IDs
+# shellcheck disable=SC2034
+readonly -A UPS_VENDORS=(
+  ["051d"]="APC"
+  ["0764"]="CyberPower"
+  ["0463"]="Eaton"
+  ["09ae"]="Tripp Lite"
+  ["10af"]="Liebert"
+)
+
+readonly -A UPS_DRIVERS=(
+  [1]="usbhid-ups"
+  [2]="blazer_usb"
+  [3]="nutdrv_qx"
+)
+
+readonly -A DRIVER_DESCS=(
+  [1]="usbhid-ups - APC, Eaton, CyberPower (recommended)"
+  [2]="blazer_usb - Generic Megatec/Q1 protocol"
+  [3]="nutdrv_qx - Newer generic USB devices"
+)
 
 #===============================================================================
 # Section 2: Input/Prompt Helper Functions (whiptail)
@@ -302,7 +243,7 @@ check_proxmox() {
 check_dependencies() {
   local missing=()
 
-  for cmd in ssh scp wget lsusb whiptail timeout openssl ssh-keygen ip; do
+  for cmd in ssh scp wget curl lsusb whiptail timeout openssl ssh-keygen ip sha256sum dpkg; do
     if ! command -v "$cmd" &>/dev/null; then
       missing+=("$cmd")
     fi
@@ -312,6 +253,18 @@ check_dependencies() {
     msg_error "Missing required dependencies: ${missing[*]}"
   fi
   msg_ok "Dependencies satisfied"
+}
+
+check_architecture() {
+  local arch
+  arch=$(dpkg --print-architecture)
+  if [[ "$arch" != "amd64" ]]; then
+    echo -e "\n ${INFO}${YW}This script requires an amd64 Proxmox host (detected: ${arch})."
+    echo -e " ${YW}The Ubuntu Noble cloud image ships amd64 only."
+    sleep 2
+    exit 1
+  fi
+  msg_ok "Architecture: amd64"
 }
 
 get_next_vmid() {
@@ -411,48 +364,92 @@ collect_nut_config() {
 }
 
 #===============================================================================
-# Section 6: Cloud Image Download + VM Creation
+# Section 6: Storage Type Detection
+#===============================================================================
+
+determine_storage_type() {
+  STORAGE_TYPE=$(pvesm status -storage "$VM_STORAGE" | awk 'NR>1 {print $2}')
+  case $STORAGE_TYPE in
+    nfs | dir | cifs)
+      DISK_EXT=".qcow2"; DISK_REF_PREFIX="${VM_ID}/"; DISK_IMPORT="-format qcow2";;
+    btrfs)
+      DISK_EXT=".raw"; DISK_REF_PREFIX="${VM_ID}/"; DISK_IMPORT="-format raw";;
+    *)
+      DISK_EXT=""; DISK_REF_PREFIX=""; DISK_IMPORT="-format raw";;
+  esac
+  DISK0="vm-${VM_ID}-disk-0${DISK_EXT}"
+  DISK0_REF="${VM_STORAGE}:${DISK_REF_PREFIX}${DISK0}"
+}
+
+#===============================================================================
+# Section 7: Cloud Image Download + SSH Key + Cloud-Init Snippet
 #===============================================================================
 
 download_cloud_image() {
   local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
 
   if [[ -f "$img_path" ]]; then
-    msg_ok "Using cached Ubuntu 24.04 cloud image"
-    return 0
+    msg_info "Verifying cached Ubuntu 24.04 cloud image"
+    local expected_sha
+    expected_sha=$(curl -fsSL "$UBUNTU_IMG_CHECKSUM_URL" | grep " \*\?${UBUNTU_IMG_NAME}$" | awk '{print $1}')
+    if [[ -n "$expected_sha" ]] && echo "${expected_sha}  ${img_path}" | sha256sum -c --status 2>/dev/null; then
+      msg_ok "Using cached Ubuntu 24.04 cloud image (checksum verified)"
+      return 0
+    fi
+    msg_info "Cached image checksum mismatch — re-downloading"
+    rm -f "$img_path"
   fi
 
   msg_info "Downloading Ubuntu 24.04 cloud image"
   mkdir -p "$IMG_CACHE_DIR"
 
-  if command -v wget &>/dev/null; then
-    if ! wget -q -c -O "$img_path.tmp" "$UBUNTU_IMG_URL" 2>/dev/null; then
-      msg_error "Failed to download cloud image"
-    fi
-  elif command -v curl &>/dev/null; then
-    if ! curl -sL --continue-at - -o "$img_path.tmp" "$UBUNTU_IMG_URL" 2>/dev/null; then
-      msg_error "Failed to download cloud image"
-    fi
-  else
-    msg_error "Neither wget nor curl is available"
+  if ! wget -q -c -O "${img_path}.tmp" "$UBUNTU_IMG_URL" 2>/dev/null; then
+    msg_error "Failed to download cloud image"
   fi
 
-  mv "$img_path.tmp" "$img_path"
-  msg_ok "Downloaded Ubuntu 24.04 cloud image"
+  mv "${img_path}.tmp" "$img_path"
+
+  msg_info "Verifying SHA-256 checksum"
+  local expected_sha
+  expected_sha=$(curl -fsSL "$UBUNTU_IMG_CHECKSUM_URL" | grep " \*\?${UBUNTU_IMG_NAME}$" | awk '{print $1}')
+  if [[ -z "$expected_sha" ]]; then
+    msg_error "Could not fetch checksum for $UBUNTU_IMG_NAME"
+  fi
+  if ! echo "${expected_sha}  ${img_path}" | sha256sum -c --status; then
+    rm -f "$img_path"
+    msg_error "SHA-256 checksum verification failed — image may be corrupt"
+  fi
+
+  msg_ok "Downloaded and verified Ubuntu 24.04 cloud image"
 }
+
 
 inject_ssh_key() {
   TEMP_KEY_DIR="/tmp/nut-setup-$$"
   mkdir -p "$TEMP_KEY_DIR"
 
-  ssh-keygen -t ed25519 -f "$TEMP_KEY_DIR/nut-setup-key" -N "" -C "nut-setup-temp" &>/dev/null
+  $STD ssh-keygen -t ed25519 -f "$TEMP_KEY_DIR/nut-setup-key" -N "" -C "nut-setup-temp"
 
   TEMP_SSH_KEY="$TEMP_KEY_DIR/nut-setup-key"
   TEMP_SSH_PUB="$TEMP_KEY_DIR/nut-setup-key.pub"
 
   cleanup_temp_keys() {
     [[ -d "$TEMP_KEY_DIR" ]] && rm -rf "$TEMP_KEY_DIR"
-    [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]] && rm -f "$CLOUDINIT_SNIPPET"
+    if [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]]; then
+      if [[ -n "${VM_ID:-}" ]]; then
+        local cur new
+        cur=$(qm config "$VM_ID" 2>/dev/null | awk -F': ' '/^cicustom:/{print $2}')
+        if [[ -n "$cur" ]]; then
+          new=$(printf '%s' "$cur" | tr ',' '\n' | { grep -v '^vendor=' || true; } | paste -sd ',' -)
+          if [[ -n "$new" ]]; then
+            qm set "$VM_ID" --cicustom "$new" &>/dev/null || true
+          else
+            qm set "$VM_ID" --delete cicustom &>/dev/null || true
+          fi
+        fi
+      fi
+      rm -f "$CLOUDINIT_SNIPPET"
+    fi
   }
   trap cleanup_temp_keys EXIT
 
@@ -461,16 +458,22 @@ inject_ssh_key() {
 
 generate_cloudinit_snippet() {
   local snippet_path="/var/lib/vz/snippets/nut-vm-${VM_ID}-cloudinit.yaml"
+  CLOUDINIT_SNIPPET=""
 
-  # Proxmox requires 'snippets' content type on the storage or it rejects the
-  # volume reference at VM start with "volume does not exist".
   local cfg_content
   cfg_content=$(awk '/^dir: local/{f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
   if [[ "$cfg_content" != *snippets* ]]; then
     if [[ -n "$cfg_content" ]]; then
-      pvesm set local --content "${cfg_content},snippets" &>/dev/null || true
+      pvesm set local --content "${cfg_content},snippets" 2>/dev/null || true
     else
-      pvesm set local --content "vztmpl,iso,backup,snippets" &>/dev/null || true
+      pvesm set local --content "vztmpl,iso,backup,snippets" 2>/dev/null || true
+    fi
+    # Re-read config to confirm the update took effect
+    cfg_content=$(awk '/^dir: local/{f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
+    if [[ "$cfg_content" != *snippets* ]]; then
+      msg_warn "Could not enable snippets on local storage — vendor cloud-init snippet will be skipped"
+      msg_warn "VM IP detection will fall back to manual entry after boot"
+      return 0
     fi
   fi
 
@@ -489,53 +492,58 @@ EOF
   msg_ok "Generated cloud-init snippet"
 }
 
+#===============================================================================
+# Section 8: VM Creation
+#===============================================================================
+
 create_vm() {
   local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
 
   generate_cloudinit_snippet
+  determine_storage_type
 
   msg_info "Creating VM $VM_ID"
-
-  if ! qm create "$VM_ID" \
+  $STD qm create "$VM_ID" \
     --name "$VM_NAME" \
     --memory "$VM_RAM" \
     --cores "$VM_CORES" \
     --net0 "virtio,bridge=$VM_BRIDGE" \
     --ostype l26 \
-    --agent "enabled=1" \
+    --agent enabled=1 \
     --serial0 socket \
-    --vga serial0 &>/dev/null; then
-    msg_error "Failed to create VM"
-  fi
-
+    --vga serial0 \
+    --onboot 1 \
+    --tags community-script
   msg_ok "Created VM $VM_ID"
 
   msg_info "Importing disk image"
-
-  if ! qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" &>/dev/null; then
+  if ! $STD qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" $DISK_IMPORT; then
     msg_error "Failed to import disk"
   fi
-
   msg_ok "Imported disk image"
 
   msg_info "Configuring VM"
+  $STD qm set "$VM_ID" --scsihw virtio-scsi-pci
+  $STD qm set "$VM_ID" --scsi0 "${DISK0_REF}"
+  $STD qm resize "$VM_ID" scsi0 "${VM_DISK_GB}G"
+  $STD qm set "$VM_ID" --boot c --bootdisk scsi0
 
-  qm set "$VM_ID" --scsihw virtio-scsi-pci &>/dev/null
-  qm set "$VM_ID" --scsi0 "${VM_STORAGE}:vm-${VM_ID}-disk-0" &>/dev/null
-  qm resize "$VM_ID" scsi0 "${VM_DISK_GB}G" &>/dev/null
-  qm set "$VM_ID" --ide2 "${VM_STORAGE}:cloudinit" &>/dev/null
-  qm set "$VM_ID" --boot c --bootdisk scsi0 &>/dev/null
-  qm set "$VM_ID" --ipconfig0 "ip=dhcp" &>/dev/null
-  qm set "$VM_ID" --ciuser "$VM_USER" &>/dev/null
-  qm set "$VM_ID" --cipassword "$VM_PASSWORD" &>/dev/null
-  qm set "$VM_ID" --sshkeys "$TEMP_SSH_PUB" &>/dev/null
-  qm set "$VM_ID" --cicustom "vendor=local:snippets/nut-vm-${VM_ID}-cloudinit.yaml" &>/dev/null
+  # setup_cloud_init generates a random password; override with the user-supplied one.
+  # CLOUDINIT_SSH_KEYS set here so setup_cloud_init injects the temp key instead of
+  # reading from ~/.ssh/authorized_keys.
+  CLOUDINIT_SSH_KEYS="$TEMP_SSH_PUB"
+  setup_cloud_init "$VM_ID" "$VM_STORAGE" "$VM_NAME" "yes" "$VM_USER"
+  $STD qm set "$VM_ID" --cipassword "$VM_PASSWORD"
+  # Vendor snippet installs qemu-guest-agent on first boot (required for get_vm_ip).
+  if [[ -n "${CLOUDINIT_SNIPPET:-}" ]]; then
+    $STD qm set "$VM_ID" --cicustom "vendor=local:snippets/nut-vm-${VM_ID}-cloudinit.yaml"
+  fi
 
   msg_ok "VM configured"
 }
 
 #===============================================================================
-# Section 7: USB Detection + Passthrough
+# Section 9: USB Detection + Passthrough
 #===============================================================================
 
 detect_ups() {
@@ -662,7 +670,7 @@ setup_usb_passthrough() {
     usb_param="host=${UPS_VENDOR_PRODUCT}"
   fi
 
-  if qm set "$VM_ID" --usb0 "$usb_param" &>/dev/null; then
+  if $STD qm set "$VM_ID" --usb0 "$usb_param"; then
     msg_ok "USB passthrough configured"
   else
     msg_warn "Failed to set USB passthrough (continuing anyway)"
@@ -670,13 +678,13 @@ setup_usb_passthrough() {
 }
 
 #===============================================================================
-# Section 8: VM Boot + SSH Readiness Wait
+# Section 10: VM Boot + SSH Readiness Wait
 #===============================================================================
 
 start_vm() {
   msg_info "Starting VM $VM_ID"
 
-  if ! qm start "$VM_ID" &>/dev/null; then
+  if ! $STD qm start "$VM_ID"; then
     msg_error "Failed to start VM"
   fi
 
@@ -709,12 +717,11 @@ wait_ssh() {
 }
 
 get_vm_ip() {
-  msg_info "Waiting for guest agent to report VM IP"
+  # Wait for the qemu-guest-agent installed by the cloud-init snippet.
+  # Once cloud-init finishes (~3-5 min on first boot), the agent reports IPs directly.
+  msg_info "Waiting for VM guest agent (cloud-init installs it on first boot, ~3-5 min)"
 
-  local elapsed=0
-  local max_wait=120
-  local ip=""
-  local node
+  local ip="" node elapsed=0 max_wait=600
   node=$(hostname)
 
   while [[ $elapsed -lt $max_wait ]]; do
@@ -722,16 +729,17 @@ get_vm_ip() {
       --output-format json 2>/dev/null | python3 -c "
 import sys, json
 try:
-    data = json.load(sys.stdin)
-    for iface in data.get('result', []):
-        for addr in iface.get('ip-addresses', []):
-            a = addr.get('ip-address', '')
-            if addr.get('ip-address-type') == 'ipv4' and not a.startswith('127.') and not a.startswith('169.254.'):
-                print(a)
+    for iface in json.load(sys.stdin).get('result', []):
+        for a in iface.get('ip-addresses', []):
+            addr = a.get('ip-address', '')
+            if (a.get('ip-address-type') == 'ipv4'
+                    and not addr.startswith('127.')
+                    and not addr.startswith('169.254.')):
+                print(addr)
                 sys.exit(0)
-except:
+except Exception:
     pass
-" 2>/dev/null || true)
+" 2>/dev/null) || true
 
     if [[ -n "$ip" ]]; then
       VM_IP="$ip"
@@ -739,23 +747,21 @@ except:
       return 0
     fi
 
-    sleep 5
-    elapsed=$((elapsed + 5))
+    sleep 15
+    elapsed=$((elapsed + 15))
+    [[ $((elapsed % 60)) -eq 0 ]] && msg_info "Still waiting for guest agent (${elapsed}s elapsed)"
   done
 
-  msg_warn "Could not get IP from guest agent"
+  msg_warn "Guest agent did not respond after ${max_wait}s"
   VM_IP=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
     --title "VM IP ADDRESS" \
     --inputbox "Enter VM IP address manually:" \
     8 58 "" 3>&1 1>&2 2>&3) || msg_error "No IP address provided"
-
-  if [[ -z "$VM_IP" ]]; then
-    msg_error "No IP address provided"
-  fi
+  [[ -z "$VM_IP" ]] && msg_error "No IP address provided"
 }
 
 #===============================================================================
-# Section 9: NUT Install Heredoc + SCP + SSH Execution
+# Section 11: NUT Install Heredoc + SCP + SSH Execution
 #===============================================================================
 
 build_nut_install_script() {
@@ -773,6 +779,12 @@ MONITOR_USER="__MONITOR_USER__"
 MONITOR_PASS="__MONITOR_PASS__"
 LISTEN_ADDR="__LISTEN_ADDR__"
 LISTEN_PORT="__LISTEN_PORT__"
+
+echo "[NUT-INSTALL] Waiting for cloud-init to finish..."
+cloud-init status --wait >/dev/null 2>&1 || true
+
+echo "[NUT-INSTALL] Waiting for apt lock..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 2; done
 
 echo "[NUT-INSTALL] Updating packages..."
 apt-get update -qq >/dev/null 2>&1
@@ -901,7 +913,7 @@ deploy_nut_script() {
   echo "$NUT_INSTALL_SCRIPT" >"$local_script"
 
   while [[ $retry_count -lt $max_retries ]]; do
-    if scp -o StrictHostKeyChecking=no \
+    if scp -q -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null \
       -o ConnectTimeout=10 \
       -o GSSAPIAuthentication=no \
@@ -969,7 +981,7 @@ run_nut_install() {
 }
 
 #===============================================================================
-# Section 10: Final Summary Output
+# Section 12: Final Summary Output
 #===============================================================================
 
 print_summary() {
@@ -1042,14 +1054,17 @@ main() {
     ;;
   esac
 
+  header_info
+  color
+  variables
   catch_errors
 
-  header_info
   echo -e "${BOLD}  v${SCRIPT_VERSION}${CL}\n"
 
   check_root
   check_proxmox
   check_dependencies
+  check_architecture
 
   inject_ssh_key
 
@@ -1067,22 +1082,17 @@ main() {
   setup_usb_passthrough
   start_vm
 
-  msg_info "Waiting ${VM_START_DELAY}s for VM to initialize"
-  local remaining="$VM_START_DELAY"
-  while [[ $remaining -gt 0 ]]; do
-    printf "\r${YW}  ⏳${CL} %2d seconds remaining..." "$remaining"
-    sleep 1
-    ((remaining--))
-  done
-  echo
-  msg_ok "VM initialization wait complete"
-
   get_vm_ip
   wait_ssh "$VM_IP" 22
   run_nut_install
+
+  msg_info "Rebooting VM ${VM_ID} to apply NUT configuration"
+  qm reboot "$VM_ID" 2>/dev/null || qm reset "$VM_ID" 2>/dev/null || true
+  msg_ok "VM rebooted"
+
   print_summary
 }
 
-trap '[[ -n "$SPINNER_PID" ]] && kill "$SPINNER_PID" 2>/dev/null; printf "\e[?25h"; echo -e "\n${RD}Interrupted${CL}"; exit 130' INT TERM
+trap '[[ -n "${SPINNER_PID:-}" ]] && kill "${SPINNER_PID:-}" 2>/dev/null; printf "\e[?25h"; echo -e "\n${RD}Interrupted${CL}"; exit 130' INT TERM
 
 main "$@"
