@@ -357,9 +357,7 @@ collect_nut_config() {
   prompt_default NUT_UPS_NAME "UPS name (identifier)" "ups" "UPS NAME"
   prompt_default NUT_UPS_DESC "UPS description" "My UPS" "UPS DESCRIPTION"
 
-  local driver_choice
-  prompt_menu driver_choice "SELECT NUT DRIVER" "${DRIVER_DESCS[1]}" "${DRIVER_DESCS[2]}" "${DRIVER_DESCS[3]}"
-  NUT_DRIVER="${UPS_DRIVERS[$((driver_choice + 1))]}"
+  NUT_DRIVER="usbhid-ups"
 
   prompt_default NUT_ADMIN_USER "NUT admin username" "admin" "NUT ADMIN USER"
   prompt_password NUT_ADMIN_PASS "NUT admin password"
@@ -863,7 +861,31 @@ done
 echo "[NUT-INSTALL] Configuring NUT..."
 
 echo '__NUT_CONF_B64__' | base64 -d > /etc/nut/nut.conf
-echo '__UPS_CONF_B64__' | base64 -d > /etc/nut/ups.conf
+
+echo "[NUT-INSTALL] Detecting UPS driver with nut-scanner..."
+NUT_SCANNER_OUTPUT=$(nut-scanner -U 2>/dev/null || true)
+
+if [[ -n "$NUT_SCANNER_OUTPUT" ]] && echo "$NUT_SCANNER_OUTPUT" | grep -q "driver"; then
+    echo "[NUT-INSTALL] UPS auto-detected by nut-scanner"
+    DETECTED_DRIVER=$(echo "$NUT_SCANNER_OUTPUT" | awk -F'"' '/driver[[:space:]]*=/ {print $2; exit}')
+    DETECTED_PORT=$(echo "$NUT_SCANNER_OUTPUT" | awk -F'"' '/^[[:space:]]+port[[:space:]]*=/ {print $2; exit}')
+    DETECTED_VENDORID=$(echo "$NUT_SCANNER_OUTPUT" | awk -F'"' '/vendorid[[:space:]]*=/ {print $2; exit}')
+    DETECTED_PRODUCTID=$(echo "$NUT_SCANNER_OUTPUT" | awk -F'"' '/productid[[:space:]]*=/ {print $2; exit}')
+
+    {
+        printf '[%s]\n' "$UPS_NAME"
+        printf '  driver = %s\n' "${DETECTED_DRIVER:-$DRIVER}"
+        printf '  port = %s\n' "${DETECTED_PORT:-auto}"
+        [[ -n "$DETECTED_VENDORID" ]] && printf '  vendorid = %s\n' "$DETECTED_VENDORID"
+        [[ -n "$DETECTED_PRODUCTID" ]] && printf '  productid = %s\n' "$DETECTED_PRODUCTID"
+        printf '  desc = "%s"\n' "$UPS_DESC"
+        printf '  pollinterval = 2\n'
+    } > /etc/nut/ups.conf
+else
+    echo "[NUT-INSTALL] nut-scanner did not detect UPS, using fallback driver: $DRIVER"
+    echo '__UPS_CONF_B64__' | base64 -d > /etc/nut/ups.conf
+fi
+
 echo '__UPSD_CONF_B64__' | base64 -d > /etc/nut/upsd.conf
 echo '__UPSD_USERS_B64__' | base64 -d > /etc/nut/upsd.users
 echo '__UPSMON_CONF_B64__' | base64 -d > /etc/nut/upsmon.conf
