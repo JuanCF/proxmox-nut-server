@@ -15,6 +15,7 @@ A bash script to automatically create an Ubuntu 24.04 VM on Proxmox VE, configur
 - 🎯 **Interactive Configuration** - Guided prompts for all settings with sensible defaults
 - 📊 **Status Summary** - Provides test commands and client configuration snippets
 - 🛡️ **Error Handling** - Validates inputs, handles edge cases (duplicate UPS models, slow DHCP, etc.)
+- 🔑 **Auto-Generated Passwords** - Optionally generate secure passwords automatically
 
 ## Supported UPS Vendors
 
@@ -41,28 +42,28 @@ Other USB UPS devices can be configured manually.
 ### Quick Install (One-Liner)
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/vm/nut-vm.sh)"
 ```
 
 ### Manual Download
 
 ```bash
 # Download the script
-curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/src/nut-vm.sh -o nut-vm.sh
+curl -fsSL https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main/vm/nut-vm.sh -o nut-vm.sh
 
 # Or clone the repository
 git clone https://github.com/JuanCF/proxmox-nut-server.git
 cd proxmox-nut-server
 
 # Run from source
-bash src/nut-vm.sh
+bash vm/nut-vm.sh
 ```
 
 ## Usage
 
 ```bash
 # Run on Proxmox host as root (from cloned repo)
-bash src/nut-vm.sh
+bash vm/nut-vm.sh
 
 # Or if downloaded directly
 bash nut-vm.sh
@@ -71,8 +72,9 @@ bash nut-vm.sh
 ### CLI Options
 
 ```bash
-bash src/nut-vm.sh --help     # Show help
-bash src/nut-vm.sh --version  # Show version
+bash vm/nut-vm.sh --help     # Show help
+bash vm/nut-vm.sh --version  # Show version
+bash vm/nut-vm.sh --debug    # Enable debug tracing
 ```
 
 ### Interactive Prompts
@@ -198,7 +200,7 @@ Proxmox Host
 ├── USB UPS Device
 │   └── USB Passthrough ──┐
 │                         ▼
-├── src/nut-vm.sh  VM (Ubuntu 24.04)
+├── vm/nut-vm.sh   VM (Ubuntu 24.04 minimal)
 │   ├── Downloads        │   ├── NUT Server
 │   ├── Creates VM ────►│   │   ├── nut-driver (usbhid-ups)
 │   ├── Detects UPS      │   │   ├── upsd (port 3493)
