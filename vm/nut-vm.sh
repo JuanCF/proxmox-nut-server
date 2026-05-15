@@ -831,7 +831,16 @@ echo "[NUT-INSTALL] Waiting for cloud-init to finish..."
 cloud-init status --wait >/dev/null 2>&1 || true
 
 echo "[NUT-INSTALL] Waiting for apt lock..."
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 2; done
+APT_LOCK_MAX=30
+APT_LOCK_WAIT=0
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  if [[ $APT_LOCK_WAIT -ge $APT_LOCK_MAX ]]; then
+    echo "[NUT-INSTALL] Error: apt lock is still held after $((APT_LOCK_MAX * 2)) seconds, aborting."
+    exit 1
+  fi
+  sleep 2
+  ((APT_LOCK_WAIT++))
+done
 
 echo "[NUT-INSTALL] Updating packages..."
 apt-get update -qq >/dev/null 2>&1
