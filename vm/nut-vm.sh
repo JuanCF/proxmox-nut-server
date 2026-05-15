@@ -10,7 +10,7 @@
 # Consumed by build.func via source on line 18 — shellcheck can’t follow non-constant sources.
 # shellcheck disable=SC2034
 APP="NUT VM"
-var_tags="nut;vm;ups"
+var_tags="nut;vm;ups;network"
 var_cpu="1"
 var_ram="1024"
 var_disk="8"
@@ -379,17 +379,17 @@ determine_storage_type() {
   nfs | dir | cifs)
     DISK_EXT=".qcow2"
     DISK_REF_PREFIX="${VM_ID}/"
-    DISK_IMPORT="-format qcow2"
+    DISK_IMPORT=(--format qcow2)
     ;;
   btrfs)
     DISK_EXT=".raw"
     DISK_REF_PREFIX="${VM_ID}/"
-    DISK_IMPORT="-format raw"
+    DISK_IMPORT=(--format raw)
     ;;
   *)
     DISK_EXT=""
     DISK_REF_PREFIX=""
-    DISK_IMPORT="-format raw"
+    DISK_IMPORT=(--format raw)
     ;;
   esac
   DISK0="vm-${VM_ID}-disk-0${DISK_EXT}"
@@ -527,13 +527,15 @@ create_vm() {
     --serial0 socket \
     --vga serial0 \
     --onboot 1 \
-    --tags community-script
+    --tags 'community-script;nut;network;ups'
   msg_ok "Created VM $VM_ID"
 
   msg_info "Importing disk image"
-  if ! $STD qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" "$DISK_IMPORT"; then
+  [[ "${VERBOSE:-}" == "yes" ]] && set -x
+  if ! $STD qm importdisk "$VM_ID" "$img_path" "$VM_STORAGE" "${DISK_IMPORT[@]}"; then
     msg_error "Failed to import disk"
   fi
+  [[ "${VERBOSE:-}" == "yes" ]] && set +x
   msg_ok "Imported disk image"
 
   msg_info "Configuring VM"
@@ -736,7 +738,7 @@ get_vm_ip() {
   # Once cloud-init finishes (~3-5 min on first boot), the agent reports IPs directly.
   msg_info "Waiting for VM guest agent (cloud-init installs it on first boot, ~3-5 min)"
 
-  local ip="" node elapsed=0 max_wait=600
+  local ip="" node elapsed=0 max_wait=120
   node=$(hostname)
 
   while [[ $elapsed -lt $max_wait ]]; do
@@ -1051,13 +1053,14 @@ print_summary() {
 main() {
   case "${1:-}" in
   --help | -h)
-    echo "Usage: $0 [--version|--help]"
+    echo "Usage: $0 [--debug|--version|--help]"
     echo
     echo "Creates an Ubuntu 24.04 VM on Proxmox and configures NUT netserver."
     echo
     echo "Options:"
     echo "  --help, -h      Show this help message"
     echo "  --version       Show version"
+    echo "  --debug, -d     Enable debug tracing (set -x) and show all command output"
     echo
     echo "Environment:"
     echo "  VERBOSE=yes     Show full command output"
@@ -1067,12 +1070,21 @@ main() {
     echo "nut-vm.sh v${SCRIPT_VERSION}"
     exit 0
     ;;
+  --debug | -d)
+    VERBOSE=yes
+    set -x
+    ;;
   esac
 
   header_info
   color
   variables
   catch_errors
+
+  if [[ "${VERBOSE:-}" == "yes" ]]; then
+    STD=""
+    set -x
+  fi
 
   echo -e "${BOLD}  v${SCRIPT_VERSION}${CL}\n"
 
