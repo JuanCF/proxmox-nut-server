@@ -103,8 +103,15 @@ no parameter to supply a custom password. The `$VM_PASSWORD` collected from the
 user in `collect_vm_config()` would be silently discarded, and `print_summary()`
 would display the wrong credential.
 
-Fix: call `qm set "$VM_ID" --cipassword "$VM_PASSWORD"` after `setup_cloud_init`
-to override the random password.
+**Fixed:** `qm set --cipassword "$VM_PASSWORD"` was removed to prevent the
+user-supplied password from appearing on the Proxmox command line. The password
+is now embedded into the vendor cloud-init snippet
+(`/var/lib/vz/snippets/nut-vm-${VM_ID}-cloudinit.yaml`) via a `chpasswd.list`
+block, and the snippet is referenced with `--cicustom vendor=...`. The snippet
+file is created with mode `600`.
+
+**Residual risk:** the plain-text password remains at rest in
+`/var/lib/vz/snippets/` until the file is manually removed.
 
 ### Previously assessed as critical — corrected to non-breaking
 

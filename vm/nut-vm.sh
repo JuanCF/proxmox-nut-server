@@ -449,21 +449,6 @@ inject_ssh_key() {
 
   cleanup_temp_keys() {
     [[ -d "$TEMP_KEY_DIR" ]] && rm -rf "$TEMP_KEY_DIR"
-    if [[ -n "${CLOUDINIT_SNIPPET:-}" && -f "$CLOUDINIT_SNIPPET" ]]; then
-      if [[ -n "${VM_ID:-}" ]]; then
-        local cur new
-        cur=$(qm config "$VM_ID" 2>/dev/null | awk -F': ' '/^cicustom:/{print $2}')
-        if [[ -n "$cur" ]]; then
-          new=$(printf '%s' "$cur" | tr ',' '\n' | { grep -v '^vendor=' || true; } | paste -sd ',' -)
-          if [[ -n "$new" ]]; then
-            qm set "$VM_ID" --cicustom "$new" &>/dev/null || true
-          else
-            qm set "$VM_ID" --delete cicustom &>/dev/null || true
-          fi
-        fi
-      fi
-      rm -f "$CLOUDINIT_SNIPPET"
-    fi
   }
   trap cleanup_temp_keys EXIT
 
@@ -475,7 +460,7 @@ generate_cloudinit_snippet() {
   CLOUDINIT_SNIPPET=""
 
   local cfg_content
-  cfg_content=$(awk '/^dir: local/{f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
+  cfg_content=$(awk '$1 == "dir:" && $2 == "local" {f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
   if [[ "$cfg_content" != *snippets* ]]; then
     if [[ -n "$cfg_content" ]]; then
       pvesm set local --content "${cfg_content},snippets" 2>/dev/null || true
@@ -483,7 +468,7 @@ generate_cloudinit_snippet() {
       pvesm set local --content "vztmpl,iso,backup,snippets" 2>/dev/null || true
     fi
     # Re-read config to confirm the update took effect
-    cfg_content=$(awk '/^dir: local/{f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
+    cfg_content=$(awk '$1 == "dir:" && $2 == "local" {f=1} f && /content/{print $2; exit}' /etc/pve/storage.cfg 2>/dev/null || echo "")
     if [[ "$cfg_content" != *snippets* ]]; then
       msg_warn "Could not enable snippets on local storage — vendor cloud-init snippet will be skipped"
       msg_warn "VM IP detection will fall back to manual entry after boot"
@@ -493,14 +478,25 @@ generate_cloudinit_snippet() {
 
   mkdir -p "/var/lib/vz/snippets"
 
-  cat >"$snippet_path" <<'EOF'
-#cloud-config
-package_update: true
-packages:
-  - qemu-guest-agent
-runcmd:
-  - systemctl enable --now qemu-guest-agent
-EOF
+  # Embed the user-supplied password into the vendor snippet so it never
+  # appears on a Proxmox command line.  Residual risk: password at rest in
+  # /var/lib/vz/snippets until the file is manually removed.
+  python3 -c "
+import sys
+with open(sys.argv[1], 'w') as f:
+    f.write('#cloud-config\n')
+    f.write('chpasswd:\n')
+    f.write('  list: |\n')
+    f.write('    ' + sys.argv[2] + ':' + sys.argv[3] + '\n')
+    f.write('  expire: False\n')
+    f.write('ssh_pwauth: True\n')
+    f.write('package_update: true\n')
+    f.write('packages:\n')
+    f.write('  - qemu-guest-agent\n')
+    f.write('runcmd:\n')
+    f.write('  - systemctl enable --now qemu-guest-agent\n')
+" "$snippet_path" "$VM_USER" "$VM_PASSWORD"
+  chmod 600 "$snippet_path"
 
   CLOUDINIT_SNIPPET="$snippet_path"
   msg_ok "Generated cloud-init snippet"
@@ -544,14 +540,16 @@ create_vm() {
   $STD qm resize "$VM_ID" scsi0 "${VM_DISK_GB}G"
   $STD qm set "$VM_ID" --boot c --bootdisk scsi0
 
-  # setup_cloud_init generates a random password; override with the user-supplied one.
+  # setup_cloud_init generates a random password; the real password is injected
+  # via the vendor cloud-init snippet (see generate_cloudinit_snippet) so it
+  # never appears on a Proxmox command line.
   # CLOUDINIT_SSH_KEYS is read by cloud-init.func (sourced on line 19); shellcheck
   # can’t track usage across non-constant source directives.
   # shellcheck disable=SC2034
   CLOUDINIT_SSH_KEYS="$TEMP_SSH_PUB"
   setup_cloud_init "$VM_ID" "$VM_STORAGE" "$VM_NAME" "yes" "$VM_USER"
-  $STD qm set "$VM_ID" --cipassword "$VM_PASSWORD"
-  # Vendor snippet installs qemu-guest-agent on first boot (required for get_vm_ip).
+  # Vendor snippet installs qemu-guest-agent and sets the user password on first
+  # boot (required for get_vm_ip and for SSH login).
   if [[ -n "${CLOUDINIT_SNIPPET:-}" ]]; then
     $STD qm set "$VM_ID" --cicustom "vendor=local:snippets/nut-vm-${VM_ID}-cloudinit.yaml"
   fi
@@ -782,6 +780,40 @@ except Exception:
 #===============================================================================
 
 build_nut_install_script() {
+  local nut_conf_b64 ups_conf_b64 upsd_conf_b64 upsd_users_b64 upsmon_conf_b64
+
+  nut_conf_b64=$(printf '%s\n' 'MODE=netserver' | base64 -w0)
+  ups_conf_b64=$(printf '[%s]\n  driver = %s\n  port = auto\n  desc = "%s"\n  pollinterval = 2\n' "$NUT_UPS_NAME" "$NUT_DRIVER" "$NUT_UPS_DESC" | base64 -w0)
+  upsd_conf_b64=$(printf 'LISTEN %s %s\nMAXAGE 15\nSTATEPATH /var/run/nut\n' "$NUT_LISTEN_ADDR" "$NUT_LISTEN_PORT" | base64 -w0)
+  upsd_users_b64=$(printf '[%s]\n  password = %s\n  actions = SET\n  instcmds = ALL\n\n[%s]\n  password = %s\n  upsmon master\n' "$NUT_ADMIN_USER" "$NUT_ADMIN_PASS" "$NUT_MONITOR_USER" "$NUT_MONITOR_PASS" | base64 -w0)
+  upsmon_conf_b64=$(
+    printf '%s\n' \
+      "MONITOR ${NUT_UPS_NAME}@localhost:${NUT_LISTEN_PORT} 1 ${NUT_MONITOR_USER} ${NUT_MONITOR_PASS} master" \
+      "" \
+      "MINSUPPLIES 1" \
+      'SHUTDOWNCMD "/sbin/shutdown -h +0"' \
+      "POLLFREQ 5" \
+      "POLLFREQALERT 5" \
+      "HOSTSYNC 15" \
+      "DEADTIME 15" \
+      "POWERDOWNFLAG /etc/killpower" \
+      "" \
+      'NOTIFYMSG ONLINE    "UPS %s on line power"' \
+      'NOTIFYMSG ONBATT    "UPS %s on battery"' \
+      'NOTIFYMSG LOWBATT   "UPS %s battery is low"' \
+      'NOTIFYMSG COMMOK    "Communications with UPS %s established"' \
+      'NOTIFYMSG COMMBAD   "Communications with UPS %s lost"' \
+      'NOTIFYMSG SHUTDOWN  "UPS %s forcing system shutdown"' \
+      "" \
+      "NOTIFYFLAG ONLINE   SYSLOG+WALL" \
+      "NOTIFYFLAG ONBATT   SYSLOG+WALL" \
+      "NOTIFYFLAG LOWBATT  SYSLOG+WALL" \
+      "RBWARNTIME 43200" \
+      "NOCOMMWARNTIME 300" \
+      "FINALDELAY 5" |
+      base64 -w0
+  )
+
   NUT_INSTALL_SCRIPT=$(
     cat <<'NUT_SCRIPT'
 #!/usr/bin/env bash
@@ -791,9 +823,7 @@ UPS_NAME="__UPS_NAME__"
 UPS_DESC="__UPS_DESC__"
 DRIVER="__DRIVER__"
 ADMIN_USER="__ADMIN_USER__"
-ADMIN_PASS="__ADMIN_PASS__"
 MONITOR_USER="__MONITOR_USER__"
-MONITOR_PASS="__MONITOR_PASS__"
 LISTEN_ADDR="__LISTEN_ADDR__"
 LISTEN_PORT="__LISTEN_PORT__"
 
@@ -823,60 +853,11 @@ done
 
 echo "[NUT-INSTALL] Configuring NUT..."
 
-cat > /etc/nut/nut.conf <<EOF
-MODE=netserver
-EOF
-
-cat > /etc/nut/ups.conf <<EOF
-[${UPS_NAME}]
-  driver = ${DRIVER}
-  port = auto
-  desc = "${UPS_DESC}"
-  pollinterval = 2
-EOF
-
-cat > /etc/nut/upsd.conf <<EOF
-LISTEN ${LISTEN_ADDR} ${LISTEN_PORT}
-MAXAGE 15
-STATEPATH /var/run/nut
-EOF
-
-cat > /etc/nut/upsd.users <<EOF
-[${ADMIN_USER}]
-  password = ${ADMIN_PASS}
-  actions = SET
-  instcmds = ALL
-
-[${MONITOR_USER}]
-  password = ${MONITOR_PASS}
-  upsmon master
-EOF
-
-cat > /etc/nut/upsmon.conf <<EOF
-MONITOR ${UPS_NAME}@localhost:${LISTEN_PORT} 1 ${MONITOR_USER} ${MONITOR_PASS} master
-
-MINSUPPLIES 1
-SHUTDOWNCMD "/sbin/shutdown -h +0"
-POLLFREQ 5
-POLLFREQALERT 5
-HOSTSYNC 15
-DEADTIME 15
-POWERDOWNFLAG /etc/killpower
-
-NOTIFYMSG ONLINE    "UPS %s on line power"
-NOTIFYMSG ONBATT    "UPS %s on battery"
-NOTIFYMSG LOWBATT   "UPS %s battery is low"
-NOTIFYMSG COMMOK    "Communications with UPS %s established"
-NOTIFYMSG COMMBAD   "Communications with UPS %s lost"
-NOTIFYMSG SHUTDOWN  "UPS %s forcing system shutdown"
-
-NOTIFYFLAG ONLINE   SYSLOG+WALL
-NOTIFYFLAG ONBATT   SYSLOG+WALL
-NOTIFYFLAG LOWBATT  SYSLOG+WALL
-RBWARNTIME 43200
-NOCOMMWARNTIME 300
-FINALDELAY 5
-EOF
+echo '__NUT_CONF_B64__' | base64 -d > /etc/nut/nut.conf
+echo '__UPS_CONF_B64__' | base64 -d > /etc/nut/ups.conf
+echo '__UPSD_CONF_B64__' | base64 -d > /etc/nut/upsd.conf
+echo '__UPSD_USERS_B64__' | base64 -d > /etc/nut/upsd.users
+echo '__UPSMON_CONF_B64__' | base64 -d > /etc/nut/upsmon.conf
 
 echo "[NUT-INSTALL] Setting permissions..."
 chown root:nut /etc/nut/*.conf
@@ -905,15 +886,37 @@ echo "[NUT-INSTALL] Complete!"
 NUT_SCRIPT
   )
 
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__UPS_NAME__/$NUT_UPS_NAME}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__UPS_DESC__/$NUT_UPS_DESC}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__DRIVER__/$NUT_DRIVER}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__ADMIN_USER__/$NUT_ADMIN_USER}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__ADMIN_PASS__/$NUT_ADMIN_PASS}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__MONITOR_USER__/$NUT_MONITOR_USER}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__MONITOR_PASS__/$NUT_MONITOR_PASS}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__LISTEN_ADDR__/$NUT_LISTEN_ADDR}"
-  NUT_INSTALL_SCRIPT="${NUT_INSTALL_SCRIPT//__LISTEN_PORT__/$NUT_LISTEN_PORT}"
+  NUT_INSTALL_SCRIPT=$(
+    export PY_NUT_UPS_NAME="$NUT_UPS_NAME"
+    export PY_NUT_UPS_DESC="$NUT_UPS_DESC"
+    export PY_NUT_DRIVER="$NUT_DRIVER"
+    export PY_NUT_ADMIN_USER="$NUT_ADMIN_USER"
+    export PY_NUT_MONITOR_USER="$NUT_MONITOR_USER"
+    export PY_NUT_LISTEN_ADDR="$NUT_LISTEN_ADDR"
+    export PY_NUT_LISTEN_PORT="$NUT_LISTEN_PORT"
+    export PY_NUT_CONF_B64="$nut_conf_b64"
+    export PY_UPS_CONF_B64="$ups_conf_b64"
+    export PY_UPSD_CONF_B64="$upsd_conf_b64"
+    export PY_UPSD_USERS_B64="$upsd_users_b64"
+    export PY_UPSMON_CONF_B64="$upsmon_conf_b64"
+    python3 -c "
+import os, sys
+script = sys.stdin.read()
+script = script.replace('__UPS_NAME__', os.environ['PY_NUT_UPS_NAME'])
+script = script.replace('__UPS_DESC__', os.environ['PY_NUT_UPS_DESC'])
+script = script.replace('__DRIVER__', os.environ['PY_NUT_DRIVER'])
+script = script.replace('__ADMIN_USER__', os.environ['PY_NUT_ADMIN_USER'])
+script = script.replace('__MONITOR_USER__', os.environ['PY_NUT_MONITOR_USER'])
+script = script.replace('__LISTEN_ADDR__', os.environ['PY_NUT_LISTEN_ADDR'])
+script = script.replace('__LISTEN_PORT__', os.environ['PY_NUT_LISTEN_PORT'])
+script = script.replace('__NUT_CONF_B64__', os.environ['PY_NUT_CONF_B64'])
+script = script.replace('__UPS_CONF_B64__', os.environ['PY_UPS_CONF_B64'])
+script = script.replace('__UPSD_CONF_B64__', os.environ['PY_UPSD_CONF_B64'])
+script = script.replace('__UPSD_USERS_B64__', os.environ['PY_UPSD_USERS_B64'])
+script = script.replace('__UPSMON_CONF_B64__', os.environ['PY_UPSMON_CONF_B64'])
+print(script, end='')
+" <<<"$NUT_INSTALL_SCRIPT"
+  )
 }
 
 deploy_nut_script() {
@@ -927,7 +930,8 @@ deploy_nut_script() {
   local max_retries=5
   local local_script
   local_script=$(mktemp /tmp/nut-install-XXXXXX.sh)
-  echo "$NUT_INSTALL_SCRIPT" >"$local_script"
+  chmod 600 "$local_script"
+  printf '%s\n' "$NUT_INSTALL_SCRIPT" >"$local_script"
 
   while [[ $retry_count -lt $max_retries ]]; do
     if scp -q -o StrictHostKeyChecking=no \
@@ -995,6 +999,31 @@ deploy_nut_script() {
 run_nut_install() {
   build_nut_install_script
   deploy_nut_script
+}
+
+verify_nut_post_reboot() {
+  local retries=0 max_retries=18
+  msg_info "Verifying NUT server after reboot"
+  while ((retries < max_retries)); do
+    local output
+    output=$(ssh -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=5 \
+      -o GSSAPIAuthentication=no \
+      -o PasswordAuthentication=no \
+      -i "$TEMP_SSH_KEY" \
+      "${VM_USER}@${VM_IP}" \
+      "upsc '${NUT_UPS_NAME}@localhost' 2>/dev/null || true" 2>/dev/null) || true
+    if [[ -n "$output" ]]; then
+      NUT_TEST_RESULT="OK"
+      msg_ok "NUT server responding after reboot"
+      return 0
+    fi
+    sleep 5
+    retries=$((retries + 1))
+  done
+  NUT_TEST_RESULT="FAIL"
+  msg_warn "NUT server not responding after reboot — check driver/USB passthrough"
 }
 
 #===============================================================================
@@ -1116,6 +1145,24 @@ main() {
   msg_info "Rebooting VM ${VM_ID} to apply NUT configuration"
   qm reboot "$VM_ID" 2>/dev/null || qm reset "$VM_ID" 2>/dev/null || true
   msg_ok "VM rebooted"
+
+  local reboot_wait=0 reboot_max=90
+  msg_info "Waiting for VM to finish rebooting"
+  while ((reboot_wait < reboot_max)); do
+    if timeout 2 bash -c "echo >/dev/tcp/${VM_IP}/22" 2>/dev/null; then
+      msg_ok "VM is reachable after reboot"
+      break
+    fi
+    sleep 5
+    reboot_wait=$((reboot_wait + 5))
+  done
+  if ((reboot_wait >= reboot_max)); then
+    msg_warn "VM is still rebooting — upsc command may not be immediately available"
+  fi
+
+  if ((reboot_wait < reboot_max)); then
+    verify_nut_post_reboot
+  fi
 
   print_summary
 }
