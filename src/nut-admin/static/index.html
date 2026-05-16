@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NUT Admin</title>
+<style>
+  :root {
+    --bg: #0b0c10;
+    --panel: #111318;
+    --border: #1f232a;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --orange: #db6d28;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.1rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  header h1 span { color: var(--accent); font-family: var(--mono); }
+  nav { display: flex; gap: 0.5rem; }
+  nav button {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+  }
+  nav button.active { color: var(--text); border-color: var(--accent); }
+  .container { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+  .section { display: none; }
+  .section.active { display: block; }
+  h2 { margin: 0 0 1rem; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  button.primary {
+    background: var(--accent); border: none; color: #fff; padding: 0.4rem 0.8rem;
+    border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+  }
+  button.secondary {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;
+  }
+  button.danger { background: var(--red); border: none; color: #fff; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 1rem;
+  }
+  .card h3 { margin: 0 0 0.5rem; font-size: 1rem; font-family: var(--mono); }
+  .card .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; font-family: var(--mono); }
+  .badge {
+    display: inline-block; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.75rem;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .badge.online { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.onbatt { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .badge.offline { background: rgba(248,81,73,0.15); color: var(--red); }
+  .badge.unknown { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .actions { margin-top: 0.75rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+  td { font-family: var(--mono); }
+  .log-box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.75rem; height: 500px; overflow-y: auto; font-family: var(--mono);
+    font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap;
+  }
+  .log-line.error { color: var(--red); }
+  .log-line.warn { color: var(--yellow); }
+  .log-line.info { color: var(--accent); }
+  textarea {
+    width: 100%; height: 400px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem;
+    font-family: var(--mono); font-size: 0.85rem; resize: vertical;
+  }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    width: 90%; max-width: 520px; max-height: 90vh; overflow-y: auto; padding: 1.25rem;
+  }
+  .modal h3 { margin: 0 0 1rem; }
+  .field { margin-bottom: 0.75rem; }
+  .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+  .field input, .field select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 0.4rem 0.5rem; border-radius: 4px; font-family: var(--mono); font-size: 0.9rem;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+  .scan-output {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.75rem; font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap;
+    max-height: 300px; overflow-y: auto; margin-top: 0.5rem;
+  }
+  .config-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  .empty { color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>NUT</span> Admin</h1>
+  <nav>
+    <button class="active" onclick="showSection('ups')">UPS Devices</button>
+    <button onclick="showSection('users')">Users</button>
+    <button onclick="showSection('logs')">Logs</button>
+    <button onclick="showSection('config')">Config Files</button>
+  </nav>
+</header>
+
+<div class="container">
+  <div id="sec-ups" class="section active">
+    <h2>UPS Devices</h2>
+    <div class="toolbar">
+      <button class="primary" onclick="openUpsModal()">Add UPS</button>
+      <button class="secondary" onclick="scanUps()">Scan USB</button>
+      <button class="secondary" onclick="loadUps()">Refresh</button>
+    </div>
+    <div id="ups-grid" class="card-grid"></div>
+  </div>
+
+  <div id="sec-users" class="section">
+    <h2>Users</h2>
+    <div class="toolbar">
+      <button class="primary" onclick="openUserModal()">Add User</button>
+      <button class="secondary" onclick="loadUsers()">Refresh</button>
+    </div>
+    <div id="users-table-wrap">
+      <table>
+        <thead><tr><th>Username</th><th>Role</th><th>Password</th><th>Actions</th><th>Instcmds</th><th></th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="sec-logs" class="section">
+    <h2>Logs</h2>
+    <div class="toolbar">
+      <button class="secondary" id="log-pause" onclick="toggleLogPause()">Pause</button>
+      <button class="secondary" onclick="loadRecentLogs()">Load Recent</button>
+      <label style="font-size:0.85rem;color:var(--muted);display:flex;align-items:center;gap:0.3rem;">
+        <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+      </label>
+    </div>
+    <div id="log-box" class="log-box"></div>
+  </div>
+
+  <div id="sec-config" class="section">
+    <h2>Config Files</h2>
+    <div class="config-buttons">
+      <button class="secondary" onclick="loadConfig('ups.conf')">ups.conf</button>
+      <button class="secondary" onclick="loadConfig('upsd.conf')">upsd.conf</button>
+      <button class="secondary" onclick="loadConfig('upsmon.conf')">upsmon.conf</button>
+      <button class="secondary" onclick="loadConfig('upsd.users')">upsd.users</button>
+    </div>
+    <div class="toolbar">
+      <button class="primary" onclick="saveConfig()">Save</button>
+      <span id="config-filename" style="font-family:var(--mono);font-size:0.85rem;color:var(--muted);"></span>
+    </div>
+    <textarea id="config-editor" readonly></textarea>
+  </div>
+</div>
+
+<div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentConfigFile = '';
+let logPaused = false;
+let es = null;
+
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  $('sec-' + id).classList.add('active');
+  event.target.classList.add('active');
+  if (id === 'logs' && !es) startLogStream();
+}
+
+async function api(path, opts) {
+  const res = await fetch('/api' + path, opts);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt);
+  }
+  if (res.headers.get('content-type')?.includes('application/json')) return res.json();
+  return res.text();
+}
+
+function badge(status) {
+  const s = (status || 'unknown').toLowerCase();
+  return '<span class="badge ' + s + '">' + s + '</span>';
+}
+
+async function loadUps() {
+  const list = await api('/ups');
+  const grid = $('ups-grid');
+  if (!list.length) { grid.innerHTML = '<div class="empty">No UPS devices configured.</div>'; return; }
+  grid.innerHTML = list.map(u => {
+    const dirs = (u.directives || []).map(d => esc(d[0]+'='+d[1])).join(', ');
+    return '<div class="card">' +
+      '<h3>' + esc(u.name) + ' ' + badge(u.status) + '</h3>' +
+      '<div class="meta">driver: ' + esc(u.driver || '-') + '</div>' +
+      '<div class="meta">port: ' + esc(u.port || '-') + '</div>' +
+      '<div class="meta">desc: ' + esc(u.desc || '-') + '</div>' +
+      (dirs ? '<div class="meta">' + dirs + '</div>' : '') +
+      '<div class="actions">' +
+        '<button class="secondary" onclick="openUpsModal(' + JSON.stringify(u).replace(/"/g,'&quot;') + ')">Edit</button>' +
+        '<button class="secondary" onclick="driverAction(\'' + esc(u.name) + '\',\'start\')">Start driver</button>' +
+        '<button class="secondary" onclick="driverAction(\'' + esc(u.name) + '\',\'stop\')">Stop driver</button>' +
+        '<button class="secondary danger" onclick="deleteUps(\'' + esc(u.name) + '\')">Delete</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+async function driverAction(name, action) {
+  if (!confirm(action + ' driver for ' + name + '?')) return;
+  const r = await api('/driver/' + encodeURIComponent(name) + '/' + action, {method:'POST'});
+  alert('Driver ' + action + ': rc=' + r.returncode + '\n' + r.stdout + '\n' + r.stderr);
+  loadUps();
+}
+
+async function deleteUps(name) {
+  if (!confirm('Delete UPS "' + name + '"?')) return;
+  await api('/ups/' + encodeURIComponent(name), {method:'DELETE'});
+  loadUps();
+}
+
+function openUpsModal(u) {
+  u = u || {};
+  const edit = !!u.name;
+  $('modal').innerHTML =
+    '<h3>' + (edit ? 'Edit' : 'Add') + ' UPS</h3>' +
+    '<div class="field"><label>Name</label><input id="u-name" value="' + esc(u.name||'') + '"' + (edit?' readonly':'') + '></div>' +
+    '<div class="field"><label>Driver</label><input id="u-driver" value="' + esc(u.driver||'usbhid-ups') + '"></div>' +
+    '<div class="field"><label>Port</label><input id="u-port" value="' + esc(u.port||'auto') + '"></div>' +
+    '<div class="field"><label>Description</label><input id="u-desc" value="' + esc(u.desc||'') + '"></div>' +
+    '<div class="field"><label>Extra directives (key=value per line)</label>' +
+      '<textarea id="u-directives" style="height:80px;font-family:var(--mono);background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.4rem;width:100%;resize:vertical;">' + esc((u.directives||[]).map(d=>d[0]+'='+d[1]).join('\n')) + '</textarea></div>' +
+    '<div class="modal-actions">' +
+      '<button class="secondary" onclick="closeModal()">Cancel</button>' +
+      '<button class="primary" onclick="saveUps(' + edit + ')">Save</button>' +
+    '</div>';
+  $('modal-overlay').classList.add('open');
+}
+
+async function saveUps(edit) {
+  const name = $('u-name').value.trim();
+  const body = {
+    driver: $('u-driver').value.trim(),
+    port: $('u-port').value.trim(),
+    desc: $('u-desc').value.trim(),
+    directives: {}
+  };
+  $('u-directives').value.split('\n').forEach(line => {
+    const idx = line.indexOf('=');
+    if (idx > 0) body.directives[line.slice(0,idx).trim()] = line.slice(idx+1).trim();
+  });
+  if (edit) {
+    await api('/ups/' + encodeURIComponent(name), {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  } else {
+    body.name = name;
+    await api('/ups', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  }
+  closeModal(); loadUps();
+}
+
+async function scanUps() {
+  $('modal').innerHTML = '<h3>Scanning USB...</h3><div class="scan-output">Running nut-scanner -U...</div>';
+  $('modal-overlay').classList.add('open');
+  try {
+    const r = await api('/ups/scan', {method:'POST'});
+    $('modal').innerHTML =
+      '<h3>USB Scan Result</h3>' +
+      '<div class="scan-output">' + esc(r.stdout || '(no stdout)') + '\n' + esc(r.stderr || '') + '</div>' +
+      '<div class="modal-actions"><button class="secondary" onclick="closeModal()">Close</button></div>';
+  } catch (e) {
+    $('modal').innerHTML = '<h3>Error</h3><div class="scan-output">' + esc(e.message) + '</div><div class="modal-actions"><button class="secondary" onclick="closeModal()">Close</button></div>';
+  }
+}
+
+async function loadUsers() {
+  const list = await api('/users');
+  const tbody = $('users-body');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No users.</td></tr>'; return; }
+  tbody.innerHTML = list.map(u =>
+    '<tr>' +
+      '<td>' + esc(u.name) + '</td>' +
+      '<td>' + esc(u.upsmon || '-') + '</td>' +
+      '<td>' + esc(u.password) + '</td>' +
+      '<td>' + esc(u.actions || '-') + '</td>' +
+      '<td>' + esc(u.instcmds || '-') + '</td>' +
+      '<td>' +
+        '<button class="secondary" onclick="openUserModal(' + JSON.stringify(u).replace(/"/g,'&quot;') + ')">Edit</button>' +
+        '<button class="secondary danger" onclick="deleteUser(\'' + esc(u.name) + '\')">Delete</button>' +
+      '</td>' +
+    '</tr>'
+  ).join('');
+}
+
+async function deleteUser(name) {
+  if (!confirm('Delete user "' + name + '"?')) return;
+  await api('/users/' + encodeURIComponent(name), {method:'DELETE'});
+  loadUsers();
+}
+
+function openUserModal(u) {
+  u = u || {};
+  const edit = !!u.name;
+  $('modal').innerHTML =
+    '<h3>' + (edit ? 'Edit' : 'Add') + ' User</h3>' +
+    '<div class="field"><label>Username</label><input id="usr-name" value="' + esc(u.name||'') + '"' + (edit?' readonly':'') + '></div>' +
+    '<div class="field"><label>Password ' + (edit?'(leave blank to keep current)':'') + '</label><input id="usr-pass" type="password" placeholder="******"></div>' +
+    '<div class="field"><label>upsmon</label><input id="usr-upsmon" value="' + esc(u.upsmon||'') + '" placeholder="master / slave"></div>' +
+    '<div class="field"><label>Actions</label><input id="usr-actions" value="' + esc(u.actions||'') + '" placeholder="SET"></div>' +
+    '<div class="field"><label>Instcmds</label><input id="usr-instcmds" value="' + esc(u.instcmds||'') + '" placeholder="ALL"></div>' +
+    '<div class="modal-actions">' +
+      '<button class="secondary" onclick="closeModal()">Cancel</button>' +
+      '<button class="primary" onclick="saveUser(' + edit + ')">Save</button>' +
+    '</div>';
+  $('modal-overlay').classList.add('open');
+}
+
+async function saveUser(edit) {
+  const name = $('usr-name').value.trim();
+  const body = {};
+  const pass = $('usr-pass').value;
+  if (pass) body.password = pass;
+  const upsmon = $('usr-upsmon').value.trim(); if (upsmon) body.upsmon = upsmon;
+  const actions = $('usr-actions').value.trim(); if (actions) body.actions = actions;
+  const instcmds = $('usr-instcmds').value.trim(); if (instcmds) body.instcmds = instcmds;
+  if (edit) {
+    await api('/users/' + encodeURIComponent(name), {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  } else {
+    if (!pass) { alert('Password is required for new users'); return; }
+    body.name = name;
+    body.password = pass;
+    await api('/users', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  }
+  closeModal(); loadUsers();
+}
+
+function startLogStream() {
+  if (es) return;
+  const box = $('log-box');
+  es = new EventSource('/api/logs/stream');
+  es.onmessage = ev => {
+    if (logPaused) return;
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const text = ev.data;
+    if (/\berror\b|\bfail\b|\berr\b/i.test(text)) line.classList.add('error');
+    else if (/\bwarn\b|\bwarning\b/i.test(text)) line.classList.add('warn');
+    else if (/\binfo\b|\bstarted\b|\brunning\b/i.test(text)) line.classList.add('info');
+    line.textContent = text;
+    box.appendChild(line);
+    if ($('log-autoscroll').checked) box.scrollTop = box.scrollHeight;
+  };
+  es.onerror = () => {
+    const line = document.createElement('div');
+    line.className = 'log-line error';
+    line.textContent = '--- Log stream disconnected ---';
+    box.appendChild(line);
+    es.close(); es = null;
+  };
+}
+
+function toggleLogPause() {
+  logPaused = !logPaused;
+  $('log-pause').textContent = logPaused ? 'Resume' : 'Pause';
+}
+
+async function loadRecentLogs() {
+  const r = await api('/logs/recent?lines=100');
+  const box = $('log-box');
+  box.innerHTML = '';
+  r.stdout.split('\n').forEach(text => {
+    if (!text) return;
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    if (/\berror\b|\bfail\b|\berr\b/i.test(text)) line.classList.add('error');
+    else if (/\bwarn\b|\bwarning\b/i.test(text)) line.classList.add('warn');
+    else if (/\binfo\b|\bstarted\b|\brunning\b/i.test(text)) line.classList.add('info');
+    line.textContent = text;
+    box.appendChild(line);
+  });
+  if ($('log-autoscroll').checked) box.scrollTop = box.scrollHeight;
+}
+
+async function loadConfig(filename) {
+  currentConfigFile = filename;
+  $('config-filename').textContent = filename;
+  const data = await api('/config/' + encodeURIComponent(filename));
+  $('config-editor').value = data;
+  $('config-editor').readOnly = filename === 'upsd.users';
+}
+
+async function saveConfig() {
+  if (!currentConfigFile) { alert('No config loaded'); return; }
+  if (currentConfigFile === 'upsd.users') { alert('upsd.users is read-only'); return; }
+  const body = $('config-editor').value;
+  await api('/config/' + encodeURIComponent(currentConfigFile), {method:'PUT', body});
+  alert('Saved ' + currentConfigFile);
+}
+
+function closeModal() {
+  $('modal-overlay').classList.remove('open');
+  $('modal').innerHTML = '';
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadUps();
+loadUsers();
+startLogStream();
+</script>
+</body>
+</html>

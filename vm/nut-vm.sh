@@ -812,6 +812,9 @@ build_nut_install_script() {
       base64 -w0
   )
 
+  local nut_admin_url_prefix
+  nut_admin_url_prefix="${NUT_ADMIN_URL_PREFIX:-https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main}"
+
   NUT_INSTALL_SCRIPT=$(
     cat <<'NUT_SCRIPT'
 #!/usr/bin/env bash
@@ -898,10 +901,18 @@ mkdir -p /var/run/nut
 chown nut:nut /var/run/nut
 
 echo "[NUT-INSTALL] Starting NUT services..."
-systemctl enable nut-driver nut-server nut-monitor >/dev/null 2>&1
-systemctl restart nut-driver >/dev/null 2>&1
+set +e
+if ! systemctl enable nut-driver nut-server nut-monitor >/dev/null 2>&1; then
+  echo "[NUT-INSTALL-WARN] Failed to enable NUT services"
+fi
+if ! systemctl restart nut-driver >/dev/null 2>&1; then
+  echo "[NUT-INSTALL-WARN] nut-driver restart failed (may not exist yet)"
+fi
 sleep 3
-systemctl restart nut-server nut-monitor >/dev/null 2>&1
+if ! systemctl restart nut-server nut-monitor >/dev/null 2>&1; then
+  echo "[NUT-INSTALL-WARN] nut-server/nut-monitor restart failed"
+fi
+set -e
 
 echo "[NUT-INSTALL] Testing NUT connection..."
 for i in $(seq 1 12); do
@@ -912,6 +923,77 @@ for i in $(seq 1 12); do
     [[ $i -eq 12 ]] && echo "NUT_TEST_FAIL"
     sleep 5
 done
+
+echo "[NUT-ADMIN] Installing NUT Admin web interface..."
+NUT_ADMIN_URL="__NUT_ADMIN_URL_PREFIX__"
+NUT_ADMIN_FAIL=0
+
+set +e
+
+echo "[NUT-ADMIN] Installing dependencies..."
+if ! apt-get update -qq >/dev/null 2>&1; then
+  echo "[NUT-ADMIN-ERROR] apt-get update failed"
+  NUT_ADMIN_FAIL=1
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]] && ! apt-get install -y -qq python3-venv python3-pip curl libusb-1.0-0 libsnmp40 libneon27-gnutls libavahi-client3 libfreeipmi17 libupsclient6 >/dev/null 2>&1; then
+  echo "[NUT-ADMIN-ERROR] apt-get install failed"
+  NUT_ADMIN_FAIL=1
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Creating application directory..."
+  mkdir -p /opt/nut-admin/static
+
+  echo "[NUT-ADMIN] Downloading admin files..."
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/app.py" -o /opt/nut-admin/app.py; then
+    echo "[NUT-ADMIN-ERROR] Failed to download app.py"
+    NUT_ADMIN_FAIL=1
+  fi
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/static/index.html" -o /opt/nut-admin/static/index.html; then
+    echo "[NUT-ADMIN-ERROR] Failed to download index.html"
+    NUT_ADMIN_FAIL=1
+  fi
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/nut-admin.service" -o /etc/systemd/system/nut-admin.service; then
+    echo "[NUT-ADMIN-ERROR] Failed to download nut-admin.service"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Setting up Python virtual environment..."
+  if ! python3 -m venv /opt/nut-admin/venv >/dev/null 2>&1; then
+    echo "[NUT-ADMIN-ERROR] python3 -m venv failed"
+    NUT_ADMIN_FAIL=1
+  elif ! /opt/nut-admin/venv/bin/pip install --quiet flask >/dev/null 2>&1; then
+    echo "[NUT-ADMIN-ERROR] pip install flask failed"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Enabling systemd service..."
+  systemctl daemon-reload
+  systemctl enable nut-admin
+
+  echo "[NUT-ADMIN] Starting service..."
+  if systemctl restart nut-admin; then
+    VM_IP="$(hostname -I | awk '{print $1}')"
+    echo ""
+    echo "NUT Admin web interface installed and running."
+    echo "URL: http://${VM_IP}:8081"
+    echo "NUT_ADMIN_OK"
+  else
+    echo "[NUT-ADMIN-ERROR] systemctl restart nut-admin failed"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -ne 0 ]]; then
+  echo "NUT_ADMIN_FAIL"
+fi
+
+set -e
 
 echo "[NUT-INSTALL] Complete!"
 NUT_SCRIPT
@@ -930,6 +1012,7 @@ NUT_SCRIPT
     export PY_UPSD_CONF_B64="$upsd_conf_b64"
     export PY_UPSD_USERS_B64="$upsd_users_b64"
     export PY_UPSMON_CONF_B64="$upsmon_conf_b64"
+    export PY_NUT_ADMIN_URL_PREFIX="$nut_admin_url_prefix"
     python3 -c "
 import os, sys
 script = sys.stdin.read()
@@ -945,6 +1028,7 @@ script = script.replace('__UPS_CONF_B64__', os.environ['PY_UPS_CONF_B64'])
 script = script.replace('__UPSD_CONF_B64__', os.environ['PY_UPSD_CONF_B64'])
 script = script.replace('__UPSD_USERS_B64__', os.environ['PY_UPSD_USERS_B64'])
 script = script.replace('__UPSMON_CONF_B64__', os.environ['PY_UPSMON_CONF_B64'])
+script = script.replace('__NUT_ADMIN_URL_PREFIX__', os.environ['PY_NUT_ADMIN_URL_PREFIX'])
 print(script, end='')
 " <<<"$NUT_INSTALL_SCRIPT"
   )
@@ -1014,6 +1098,14 @@ deploy_nut_script() {
   else
     NUT_TEST_RESULT="FAIL"
     msg_warn "NUT test failed (check driver compatibility)"
+  fi
+
+  if echo "$NUT_INSTALL_OUTPUT" | grep -q "NUT_ADMIN_OK"; then
+    msg_ok "NUT Admin web interface installed"
+  elif echo "$NUT_INSTALL_OUTPUT" | grep -q "NUT_ADMIN_FAIL"; then
+    msg_warn "NUT Admin web interface failed (check output above)"
+  else
+    msg_warn "NUT Admin web interface status unknown — may be missing"
   fi
 
   ssh -o StrictHostKeyChecking=no \
