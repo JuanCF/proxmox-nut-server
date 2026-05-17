@@ -3,11 +3,12 @@ import functools
 import logging
 import os
 import re
+import select
 import subprocess
 import tempfile
 
 try:
-    from flask import Flask, request, jsonify, Response, send_from_directory
+    from flask import Flask, request, jsonify, Response, send_from_directory, stream_with_context
 except ImportError:  # pragma: no cover
     class _FakeFlask:
         def __init__(self, *args, **kwargs):
@@ -21,6 +22,7 @@ except ImportError:  # pragma: no cover
     jsonify = None
     Response = None
     send_from_directory = None
+    stream_with_context = None
 
 app = Flask(__name__)
 
@@ -30,10 +32,15 @@ IDENTIFIER_REGEX = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,127}$")
 
 NUT_ADMIN_API_KEY = os.environ.get("NUT_ADMIN_API_KEY", "")
 NUT_ADMIN_HOST = os.environ.get("NUT_ADMIN_HOST", "0.0.0.0")
-NUT_ADMIN_PORT = int(os.environ.get("NUT_ADMIN_PORT", "8081"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nut-admin")
+
+try:
+    NUT_ADMIN_PORT = int(os.environ.get("NUT_ADMIN_PORT", "8081"))
+except ValueError:
+    logger.error("Invalid NUT_ADMIN_PORT=%r, falling back to 8081", os.environ.get("NUT_ADMIN_PORT"))
+    NUT_ADMIN_PORT = 8081
 
 
 def require_admin(f):
@@ -266,6 +273,8 @@ def add_ups():
 @app.route("/api/ups/<name>", methods=["GET"])
 @require_admin
 def get_ups(name):
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
         content = read_file(path)
@@ -282,6 +291,8 @@ def get_ups(name):
 @app.route("/api/ups/<name>", methods=["PUT"])
 @require_admin
 def edit_ups(name):
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
     data = request.get_json(force=True) or {}
     directives = data.get("directives")
     if directives is not None and not isinstance(directives, dict):
@@ -312,6 +323,8 @@ def edit_ups(name):
 @app.route("/api/ups/<name>", methods=["DELETE"])
 @require_admin
 def delete_ups(name):
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
         content = read_file(path)
@@ -380,6 +393,8 @@ def add_user():
 @app.route("/api/users/<name>", methods=["PUT"])
 @require_admin
 def edit_user(name):
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
     data = request.get_json(force=True) or {}
     directives = data.get("directives")
     if directives is not None and not isinstance(directives, dict):
@@ -408,6 +423,8 @@ def edit_user(name):
 @app.route("/api/users/<name>", methods=["DELETE"])
 @require_admin
 def delete_user(name):
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
     path = os.path.join(NUT_DIR, "upsd.users")
     try:
         content = read_file(path)
@@ -479,28 +496,42 @@ def driver_action(ups_name, action):
 @app.route("/api/logs/stream")
 @require_admin
 def stream_logs():
+    proc = subprocess.Popen(
+        [
+            "journalctl",
+            "-u", "nut-server",
+            "-u", "nut-monitor",
+            "-f",
+            "-n", "0",
+            "--no-pager",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
     def generate():
-        proc = subprocess.Popen(
-            [
-                "journalctl",
-                "-u", "nut-server",
-                "-u", "nut-monitor",
-                "-f",
-                "-n", "0",
-                "--no-pager",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
         try:
-            for line in proc.stdout:
-                yield f"data: {line.rstrip(chr(10))}\n\n"
+            while True:
+                ready, _, _ = select.select([proc.stdout], [], [], 5)
+                if ready:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    yield f"data: {line.rstrip(chr(10))}\n\n"
+                else:
+                    yield ": heartbeat\n\n"
         finally:
             proc.terminate()
             proc.wait()
 
-    return Response(generate(), mimetype="text/event-stream")
+    def cleanup():
+        proc.terminate()
+        proc.wait()
+
+    response = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    response.call_on_close(cleanup)
+    return response
 
 
 @app.route("/api/logs/recent")

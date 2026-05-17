@@ -14,7 +14,7 @@ fmt-fix:
 	shfmt -w -i 2 $(SHELL_FILES)
 
 lint-python:
-	cd src/nut-admin && python3 -m py_compile app.py && echo "app.py syntax OK"
+	@for f in $$(find src/nut-admin -name '*.py'); do python3 -m py_compile $$f || exit 1; done && echo "All Python files syntax OK"
 
 test-python:
 	cd src/nut-admin && python3 -m pytest tests/ -v
