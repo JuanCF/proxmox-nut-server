@@ -2,7 +2,7 @@ SHELL_FILES := $(shell find vm/ src/ -name "*.sh")
 
 .PHONY: check lint fmt fmt-fix install-tools lint-python test-python
 
-check: lint fmt lint-python
+check: lint fmt lint-python test-python
 
 lint:
 	shellcheck $(SHELL_FILES)

@@ -113,10 +113,10 @@
 <header>
   <h1><span>NUT</span> Admin</h1>
   <nav>
-    <button class="active" onclick="showSection('ups')">UPS Devices</button>
-    <button onclick="showSection('users')">Users</button>
-    <button onclick="showSection('logs')">Logs</button>
-    <button onclick="showSection('config')">Config Files</button>
+    <button class="active" onclick="showSection('ups', this)">UPS Devices</button>
+    <button onclick="showSection('users', this)">Users</button>
+    <button onclick="showSection('logs', this)">Logs</button>
+    <button onclick="showSection('config', this)">Config Files</button>
   </nav>
 </header>
 
@@ -182,12 +182,13 @@ const $ = id => document.getElementById(id);
 let currentConfigFile = '';
 let logPaused = false;
 let es = null;
+const MAX_LOG_LINES = 1000;
 
-function showSection(id) {
+function showSection(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   $('sec-' + id).classList.add('active');
-  event.target.classList.add('active');
+  btn.classList.add('active');
   if (id === 'logs' && !es) startLogStream();
 }
 
@@ -220,9 +221,9 @@ async function loadUps() {
       (dirs ? '<div class="meta">' + dirs + '</div>' : '') +
       '<div class="actions">' +
         '<button class="secondary" onclick="openUpsModal(' + JSON.stringify(u).replace(/"/g,'&quot;') + ')">Edit</button>' +
-        '<button class="secondary" onclick="driverAction(\'' + esc(u.name) + '\',\'start\')">Start driver</button>' +
-        '<button class="secondary" onclick="driverAction(\'' + esc(u.name) + '\',\'stop\')">Stop driver</button>' +
-        '<button class="secondary danger" onclick="deleteUps(\'' + esc(u.name) + '\')">Delete</button>' +
+        '<button class="secondary" data-ups-name="' + esc(u.name) + '" data-action="start">Start driver</button>' +
+        '<button class="secondary" data-ups-name="' + esc(u.name) + '" data-action="stop">Stop driver</button>' +
+        '<button class="secondary danger" data-ups-name="' + esc(u.name) + '" data-action="delete">Delete</button>' +
       '</div></div>';
   }).join('');
 }
@@ -306,7 +307,7 @@ async function loadUsers() {
       '<td>' + esc(u.instcmds || '-') + '</td>' +
       '<td>' +
         '<button class="secondary" onclick="openUserModal(' + JSON.stringify(u).replace(/"/g,'&quot;') + ')">Edit</button>' +
-        '<button class="secondary danger" onclick="deleteUser(\'' + esc(u.name) + '\')">Delete</button>' +
+        '<button class="secondary danger" data-user-name="' + esc(u.name) + '">Delete</button>' +
       '</td>' +
     '</tr>'
   ).join('');
@@ -368,6 +369,7 @@ function startLogStream() {
     else if (/\binfo\b|\bstarted\b|\brunning\b/i.test(text)) line.classList.add('info');
     line.textContent = text;
     box.appendChild(line);
+    while (box.children.length > MAX_LOG_LINES) box.removeChild(box.firstChild);
     if ($('log-autoscroll').checked) box.scrollTop = box.scrollHeight;
   };
   es.onerror = () => {
@@ -397,6 +399,7 @@ async function loadRecentLogs() {
     else if (/\binfo\b|\bstarted\b|\brunning\b/i.test(text)) line.classList.add('info');
     line.textContent = text;
     box.appendChild(line);
+    while (box.children.length > MAX_LOG_LINES) box.removeChild(box.firstChild);
   });
   if ($('log-autoscroll').checked) box.scrollTop = box.scrollHeight;
 }
@@ -426,6 +429,22 @@ function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-ups-name]');
+  if (!btn) return;
+  var name = btn.dataset.upsName;
+  var action = btn.dataset.action;
+  if (action === 'delete') { deleteUps(name); }
+  else { driverAction(name, action); }
+});
+
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-user-name]');
+  if (!btn) return;
+  var name = btn.dataset.userName;
+  deleteUser(name);
+});
 
 loadUps();
 loadUsers();

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
+import functools
+import logging
 import os
 import re
 import subprocess
+import tempfile
 
 try:
     from flask import Flask, request, jsonify, Response, send_from_directory
@@ -23,6 +26,30 @@ app = Flask(__name__)
 
 NUT_DIR = "/etc/nut"
 ALLOWED_CONFIGS = {"ups.conf", "upsd.conf", "upsmon.conf", "upsd.users"}
+IDENTIFIER_REGEX = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,127}$")
+
+NUT_ADMIN_API_KEY = os.environ.get("NUT_ADMIN_API_KEY", "")
+NUT_ADMIN_HOST = os.environ.get("NUT_ADMIN_HOST", "0.0.0.0")
+NUT_ADMIN_PORT = int(os.environ.get("NUT_ADMIN_PORT", "8081"))
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("nut-admin")
+
+
+def require_admin(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        if not NUT_ADMIN_API_KEY:
+            return f(*args, **kwargs)
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer "):]
+            if token == NUT_ADMIN_API_KEY:
+                return f(*args, **kwargs)
+        logger.warning("Auth failure from %s for %s", request.remote_addr, request.path)
+        return jsonify({"error": "unauthorized"}), 401
+
+    return decorated
 
 
 # --- UPS Conf Parser ---
@@ -145,8 +172,18 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
+    dir_path = os.path.dirname(path)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".nut-admin-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def run_cmd(cmd: list, timeout: int = 30) -> tuple:
@@ -175,6 +212,7 @@ def ups_status(name: str) -> str:
 # --- Routes ---
 
 @app.route("/")
+@require_admin
 def index():
     return send_from_directory(
         os.path.join(os.path.dirname(__file__), "static"), "index.html"
@@ -182,6 +220,7 @@ def index():
 
 
 @app.route("/api/ups", methods=["GET"])
+@require_admin
 def list_ups():
     try:
         content = read_file(os.path.join(NUT_DIR, "ups.conf"))
@@ -194,11 +233,17 @@ def list_ups():
 
 
 @app.route("/api/ups", methods=["POST"])
+@require_admin
 def add_ups():
     data = request.get_json(force=True) or {}
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
+    directives = data.get("directives")
+    if directives is not None and not isinstance(directives, dict):
+        return jsonify({"error": "directives must be an object"}), 400
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
         content = read_file(path)
@@ -211,7 +256,7 @@ def add_ups():
     for key in ("driver", "port", "desc"):
         if key in data:
             new_entry[key] = data[key]
-    for key, val in data.get("directives", {}).items():
+    for key, val in (directives or {}).items():
         new_entry["directives"].append([key, val])
     entries.append(new_entry)
     write_file(path, serialize_ups_conf(entries))
@@ -219,6 +264,7 @@ def add_ups():
 
 
 @app.route("/api/ups/<name>", methods=["GET"])
+@require_admin
 def get_ups(name):
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
@@ -234,8 +280,12 @@ def get_ups(name):
 
 
 @app.route("/api/ups/<name>", methods=["PUT"])
+@require_admin
 def edit_ups(name):
     data = request.get_json(force=True) or {}
+    directives = data.get("directives")
+    if directives is not None and not isinstance(directives, dict):
+        return jsonify({"error": "directives must be an object"}), 400
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
         content = read_file(path)
@@ -249,9 +299,9 @@ def edit_ups(name):
                     e[key] = data[key]
                 elif data.get("remove_" + key, False) and key in e:
                     del e[key]
-            if "directives" in data:
+            if directives is not None:
                 e["directives"] = []
-                for k, v in data["directives"].items():
+                for k, v in directives.items():
                     e["directives"].append([k, v])
             write_file(path, serialize_ups_conf(entries))
             e["status"] = ups_status(name)
@@ -260,6 +310,7 @@ def edit_ups(name):
 
 
 @app.route("/api/ups/<name>", methods=["DELETE"])
+@require_admin
 def delete_ups(name):
     path = os.path.join(NUT_DIR, "ups.conf")
     try:
@@ -275,12 +326,14 @@ def delete_ups(name):
 
 
 @app.route("/api/ups/scan", methods=["POST"])
+@require_admin
 def scan_ups():
     rc, out, err = run_cmd(["nut-scanner", "-U"], timeout=30)
     return jsonify({"returncode": rc, "stdout": out, "stderr": err})
 
 
 @app.route("/api/users", methods=["GET"])
+@require_admin
 def list_users():
     try:
         content = read_file(os.path.join(NUT_DIR, "upsd.users"))
@@ -293,11 +346,17 @@ def list_users():
 
 
 @app.route("/api/users", methods=["POST"])
+@require_admin
 def add_user():
     data = request.get_json(force=True) or {}
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
+    if not IDENTIFIER_REGEX.match(name):
+        return jsonify({"error": "name contains invalid characters"}), 400
+    directives = data.get("directives")
+    if directives is not None and not isinstance(directives, dict):
+        return jsonify({"error": "directives must be an object"}), 400
     path = os.path.join(NUT_DIR, "upsd.users")
     try:
         content = read_file(path)
@@ -310,7 +369,7 @@ def add_user():
     for key in ("password", "upsmon", "actions", "instcmds"):
         if key in data:
             new_entry[key] = data[key]
-    for key, val in data.get("directives", {}).items():
+    for key, val in (directives or {}).items():
         new_entry["directives"].append([key, val])
     entries.append(new_entry)
     write_file(path, serialize_upsd_users(entries))
@@ -319,8 +378,12 @@ def add_user():
 
 
 @app.route("/api/users/<name>", methods=["PUT"])
+@require_admin
 def edit_user(name):
     data = request.get_json(force=True) or {}
+    directives = data.get("directives")
+    if directives is not None and not isinstance(directives, dict):
+        return jsonify({"error": "directives must be an object"}), 400
     path = os.path.join(NUT_DIR, "upsd.users")
     try:
         content = read_file(path)
@@ -332,9 +395,9 @@ def edit_user(name):
             for key in ("password", "upsmon", "actions", "instcmds"):
                 if key in data:
                     e[key] = data[key]
-            if "directives" in data:
+            if directives is not None:
                 e["directives"] = []
-                for k, v in data["directives"].items():
+                for k, v in directives.items():
                     e["directives"].append([k, v])
             write_file(path, serialize_upsd_users(entries))
             e["password"] = "\u2022\u2022\u2022\u2022\u2022\u2022"
@@ -343,6 +406,7 @@ def edit_user(name):
 
 
 @app.route("/api/users/<name>", methods=["DELETE"])
+@require_admin
 def delete_user(name):
     path = os.path.join(NUT_DIR, "upsd.users")
     try:
@@ -358,6 +422,7 @@ def delete_user(name):
 
 
 @app.route("/api/config/<filename>", methods=["GET"])
+@require_admin
 def get_config(filename):
     if filename not in ALLOWED_CONFIGS:
         return jsonify({"error": "not allowed"}), 403
@@ -369,6 +434,7 @@ def get_config(filename):
 
 
 @app.route("/api/config/<filename>", methods=["PUT"])
+@require_admin
 def put_config(filename):
     if filename not in ALLOWED_CONFIGS:
         return jsonify({"error": "not allowed"}), 403
@@ -380,6 +446,7 @@ def put_config(filename):
 
 
 @app.route("/api/service/<action>", methods=["POST"])
+@require_admin
 def service_action(action):
     if action == "restart-server":
         rc, out, err = run_cmd(["systemctl", "restart", "nut-server"])
@@ -399,7 +466,10 @@ def service_action(action):
 
 
 @app.route("/api/driver/<ups_name>/<action>", methods=["POST"])
+@require_admin
 def driver_action(ups_name, action):
+    if not IDENTIFIER_REGEX.match(ups_name):
+        return jsonify({"error": "invalid ups name"}), 400
     if action not in ("start", "stop"):
         return jsonify({"error": "unknown action"}), 400
     rc, out, err = run_cmd(["upsdrvctl", action, ups_name], timeout=30)
@@ -407,6 +477,7 @@ def driver_action(ups_name, action):
 
 
 @app.route("/api/logs/stream")
+@require_admin
 def stream_logs():
     def generate():
         proc = subprocess.Popen(
@@ -433,6 +504,7 @@ def stream_logs():
 
 
 @app.route("/api/logs/recent")
+@require_admin
 def recent_logs():
     lines = request.args.get("lines", "100")
     if not lines.isdigit():
@@ -451,4 +523,4 @@ def recent_logs():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8081)
+    app.run(host=NUT_ADMIN_HOST, port=NUT_ADMIN_PORT)

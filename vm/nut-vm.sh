@@ -915,35 +915,21 @@ chown nut:nut /var/run/nut
 echo "[NUT-INSTALL] Starting NUT services..."
 set +e
 
-if systemctl list-unit-files 'nut-driver-enumerator.service' >/dev/null 2>&1; then
+if systemctl list-unit-files 'nut-driver-enumerator.service' 2>/dev/null | grep -q 'nut-driver-enumerator'; then
   systemctl daemon-reload
-  if ! systemctl enable nut-server nut-monitor nut-driver-enumerator.service nut-driver-enumerator.path nut-driver.target >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] Failed to enable NUT services"
-  fi
-  if ! systemctl restart nut-driver-enumerator.service >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] nut-driver-enumerator restart failed"
-  fi
-elif systemctl list-unit-files 'nut-driver@.service' >/dev/null 2>&1; then
+  ERR=$(systemctl enable nut-server nut-monitor nut-driver-enumerator.service nut-driver-enumerator.path nut-driver-target 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart nut-driver-enumerator.service 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver-enumerator restart failed: ${ERR}"
+elif systemctl list-unit-files 'nut-driver@.service' 2>/dev/null | grep -q 'nut-driver@'; then
   systemctl daemon-reload
-  if ! systemctl enable "nut-driver@${UPS_NAME}" nut-server nut-monitor >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] Failed to enable NUT services"
-  fi
-  if ! systemctl restart "nut-driver@${UPS_NAME}" >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] nut-driver@${UPS_NAME} restart failed"
-  fi
+  ERR=$(systemctl enable "nut-driver@${UPS_NAME}" nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart "nut-driver@${UPS_NAME}" 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver@${UPS_NAME} restart failed: ${ERR}"
 else
-  if ! systemctl enable nut-driver nut-server nut-monitor >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] Failed to enable NUT services"
-  fi
-  if ! systemctl restart nut-driver >/dev/null 2>&1; then
-    echo "[NUT-INSTALL-WARN] nut-driver restart failed"
-  fi
+  ERR=$(systemctl enable nut-driver nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart nut-driver 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver restart failed: ${ERR}"
 fi
 
 sleep 3
-if ! systemctl restart nut-server nut-monitor >/dev/null 2>&1; then
-  echo "[NUT-INSTALL-WARN] nut-server/nut-monitor restart failed"
-fi
+ERR=$(systemctl restart nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] nut-server/nut-monitor restart failed: ${ERR}"
 set -e
 
 echo "[NUT-INSTALL] Complete!"
@@ -1039,9 +1025,20 @@ fi
 
 if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
   echo "[NUT-ADMIN] Enabling systemd service..."
-  systemctl daemon-reload
-  systemctl enable nut-admin
+  if ! systemctl daemon-reload; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] systemctl daemon-reload failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
 
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  if ! systemctl enable nut-admin; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] systemctl enable nut-admin failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
   echo "[NUT-ADMIN] Starting service..."
   if systemctl restart nut-admin; then
     VM_IP="$(hostname -I | awk '{print $1}')"
@@ -1123,6 +1120,7 @@ deploy_nut_script() {
 
   msg_info "Running NUT installer on VM (this may take a few minutes)"
 
+  local nut_install_rc=0
   NUT_INSTALL_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=10 \
@@ -1131,11 +1129,15 @@ deploy_nut_script() {
     -o PasswordAuthentication=no \
     -i "$TEMP_SSH_KEY" \
     "${VM_USER}@${VM_IP}" \
-    "sudo bash $remote_script_path" 2>&1) || true
+    "sudo bash $remote_script_path" 2>&1) || nut_install_rc=$?
 
   while IFS= read -r line; do
     [[ "$line" =~ \[NUT-INSTALL-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
   done <<<"$NUT_INSTALL_OUTPUT"
+
+  if [[ $nut_install_rc -ne 0 ]]; then
+    msg_error "NUT install failed (ssh rc=$nut_install_rc)"
+  fi
 
   msg_ok "NUT install script completed"
 
