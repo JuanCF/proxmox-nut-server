@@ -68,6 +68,14 @@ readonly SSH_TIMEOUT=300
 readonly SSH_POLL_INTERVAL=5
 readonly SCRIPT_VERSION="1.0.0"
 
+# shellcheck disable=SC2080
+readonly -a SSH_OPTS=(
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o GSSAPIAuthentication=no
+  -o PasswordAuthentication=no
+)
+
 # UPS Vendor IDs
 # shellcheck disable=SC2034
 # shellcheck disable=SC2080
@@ -77,18 +85,6 @@ readonly -A UPS_VENDORS=(
   ["0463"]="Eaton"
   ["09ae"]="Tripp Lite"
   ["10af"]="Liebert"
-)
-
-readonly -A UPS_DRIVERS=(
-  [1]="usbhid-ups"
-  [2]="blazer_usb"
-  [3]="nutdrv_qx"
-)
-
-readonly -A DRIVER_DESCS=(
-  [1]="usbhid-ups - APC, Eaton, CyberPower (recommended)"
-  [2]="blazer_usb - Generic Megatec/Q1 protocol"
-  [3]="nutdrv_qx - Newer generic USB devices"
 )
 
 #===============================================================================
@@ -405,13 +401,17 @@ determine_storage_type() {
 # Section 7: Cloud Image Download + SSH Key + Cloud-Init Snippet
 #===============================================================================
 
+get_img_checksum() {
+  curl -fsSL "$UBUNTU_IMG_CHECKSUM_URL" | grep " \*\?${UBUNTU_IMG_NAME}$" | awk '{print $1}'
+}
+
 download_cloud_image() {
   local img_path="$IMG_CACHE_DIR/$UBUNTU_IMG_NAME"
 
   if [[ -f "$img_path" ]]; then
     msg_info "Verifying cached Ubuntu 24.04 cloud image"
     local expected_sha
-    expected_sha=$(curl -fsSL "$UBUNTU_IMG_CHECKSUM_URL" | grep " \*\?${UBUNTU_IMG_NAME}$" | awk '{print $1}')
+    expected_sha=$(get_img_checksum)
     if [[ -n "$expected_sha" ]] && echo "${expected_sha}  ${img_path}" | sha256sum -c --status 2>/dev/null; then
       msg_ok "Using cached Ubuntu 24.04 cloud image (checksum verified)"
       return 0
@@ -431,7 +431,7 @@ download_cloud_image() {
 
   msg_info "Verifying SHA-256 checksum"
   local expected_sha
-  expected_sha=$(curl -fsSL "$UBUNTU_IMG_CHECKSUM_URL" | grep " \*\?${UBUNTU_IMG_NAME}$" | awk '{print $1}')
+  expected_sha=$(get_img_checksum)
   if [[ -z "$expected_sha" ]]; then
     msg_error "Could not fetch checksum for $UBUNTU_IMG_NAME"
   fi
@@ -566,17 +566,21 @@ create_vm() {
 # Section 9: USB Detection + Passthrough
 #===============================================================================
 
+prompt_ups_manual_entry() {
+  local reason="$1" title="$2"
+  if whiptail --backtitle "Proxmox VE Helper Scripts" --title "$title" \
+    --yesno "$reason" 8 58; then
+    UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
+      --title "UPS DEVICE" \
+      --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
+      8 58 "" 3>&1 1>&2 2>&3) || true
+  fi
+}
+
 detect_ups() {
   if ! command -v lsusb &>/dev/null; then
     msg_warn "lsusb not found — USB detection unavailable"
-    if whiptail --backtitle "Proxmox VE Helper Scripts" \
-      --title "USB DETECTION" \
-      --yesno "lsusb not available. Enter UPS vendor:product manually?" 8 58; then
-      UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
-        --title "UPS DEVICE" \
-        --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
-        8 58 "" 3>&1 1>&2 2>&3) || true
-    fi
+    prompt_ups_manual_entry "lsusb not available. Enter UPS vendor:product manually?" "USB DETECTION"
     return
   fi
 
@@ -585,14 +589,7 @@ detect_ups() {
   local lsusb_output
   lsusb_output=$(timeout 10 lsusb 2>/dev/null) || {
     msg_warn "USB device detection timed out"
-    if whiptail --backtitle "Proxmox VE Helper Scripts" \
-      --title "USB TIMEOUT" \
-      --yesno "lsusb timed out. Enter UPS vendor:product manually?" 8 58; then
-      UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
-        --title "UPS DEVICE" \
-        --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
-        8 58 "" 3>&1 1>&2 2>&3) || true
-    fi
+    prompt_ups_manual_entry "lsusb timed out. Enter UPS vendor:product manually?" "USB TIMEOUT"
     return
   }
 
@@ -623,14 +620,7 @@ detect_ups() {
 
   if [[ $UPS_DEVICE_COUNT -eq 0 ]]; then
     msg_warn "No USB UPS devices detected"
-    if whiptail --backtitle "Proxmox VE Helper Scripts" \
-      --title "NO UPS FOUND" \
-      --yesno "No UPS devices found. Enter vendor:product manually?" 8 58; then
-      UPS_VENDOR_PRODUCT=$(whiptail --backtitle "Proxmox VE Helper Scripts" \
-        --title "UPS DEVICE" \
-        --inputbox "Enter UPS vendor:product (e.g. 051d:0002):" \
-        8 58 "" 3>&1 1>&2 2>&3) || true
-    fi
+    prompt_ups_manual_entry "No UPS devices found. Enter vendor:product manually?" "NO UPS FOUND"
     return
   elif [[ $UPS_DEVICE_COUNT -eq 1 ]]; then
     if whiptail --backtitle "Proxmox VE Helper Scripts" \
@@ -711,29 +701,31 @@ start_vm() {
   msg_ok "VM started"
 }
 
-wait_ssh() {
-  local host="$1"
-  local port="${2:-22}"
-  local timeout="${3:-$SSH_TIMEOUT}"
-  local start=$SECONDS
-  local last_report=0
-
-  msg_info "Waiting for SSH on $host:$port"
-
-  while ((SECONDS - start < timeout)); do
+wait_port() {
+  local host="$1" port="${2:-22}" timeout_sec="${3:-$SSH_TIMEOUT}" sleep_sec="${4:-5}" label="${5:-}"
+  local start=$SECONDS last_report=0
+  while ((SECONDS - start < timeout_sec)); do
     if timeout 2 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
-      msg_ok "SSH is available on $host"
       return 0
     fi
     local elapsed=$((SECONDS - start))
     if ((elapsed - last_report >= 30)); then
-      msg_info "Still waiting for SSH on $host:$port (${elapsed}s elapsed)"
+      [[ -n "$label" ]] && msg_info "Still waiting for ${label} on ${host}:${port} (${elapsed}s elapsed)"
       last_report=$elapsed
     fi
-    sleep "$SSH_POLL_INTERVAL"
+    sleep "$sleep_sec"
   done
+  return 1
+}
 
-  msg_error "SSH connection timed out after ${timeout}s — verify the VM has network access and SSH is running"
+wait_ssh() {
+  local host="$1" port="${2:-22}" timeout="${3:-$SSH_TIMEOUT}"
+  msg_info "Waiting for SSH on $host:$port"
+  if wait_port "$host" "$port" "$timeout" "$SSH_POLL_INTERVAL" "SSH"; then
+    msg_ok "SSH is available on $host"
+  else
+    msg_error "SSH connection timed out after ${timeout}s — verify the VM has network access and SSH is running"
+  fi
 }
 
 get_vm_ip() {
@@ -1072,169 +1064,67 @@ print(script, end='')
   )
 }
 
-deploy_nut_script() {
-  local remote_script_path="/tmp/nut-install.sh"
-
-  msg_info "Deploying NUT install script to VM"
-
-  sleep 20
-
-  local retry_count=0
-  local max_retries=5
-  local local_script
-  local_script=$(mktemp /tmp/nut-install-XXXXXX.sh)
-  chmod 600 "$local_script"
-  printf '%s\n' "$NUT_INSTALL_SCRIPT" >"$local_script"
+_deploy_and_run() {
+  local script_content="$1" remote_path="$2" desc="$3" retry_sleep="${4:-10}"
+  local tmp_script retry_count=0 max_retries=5
+  tmp_script=$(mktemp "/tmp/${desc// /-}-XXXXXX.sh")
+  chmod 600 "$tmp_script"
+  printf '%s\n' "$script_content" >"$tmp_script"
 
   while [[ $retry_count -lt $max_retries ]]; do
-    if scp -q -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 \
-      -o GSSAPIAuthentication=no \
-      -o PasswordAuthentication=no \
-      -i "$TEMP_SSH_KEY" \
-      "$local_script" \
-      "${VM_USER}@${VM_IP}:$remote_script_path" 2>/dev/null; then
+    if scp -q "${SSH_OPTS[@]}" -o ConnectTimeout=10 -i "$TEMP_SSH_KEY" \
+      "$tmp_script" "${VM_USER}@${VM_IP}:$remote_path" 2>/dev/null; then
       break
     fi
-    sleep 10
+    sleep "$retry_sleep"
     ((retry_count++))
   done
+  rm -f "$tmp_script"
+  [[ $retry_count -eq $max_retries ]] && msg_error "Failed to copy ${desc} script to VM"
 
-  rm -f "$local_script"
+  ssh "${SSH_OPTS[@]}" -o ConnectTimeout=10 -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" "chmod +x $remote_path" 2>/dev/null || true
 
-  if [[ $retry_count -eq $max_retries ]]; then
-    msg_error "Failed to copy install script to VM"
-  fi
+  msg_ok "${desc} script deployed"
+  msg_info "Running ${desc} installer on VM (this may take a few minutes)"
 
-  ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "chmod +x $remote_script_path" 2>/dev/null || true
+  local rc=0
+  ssh "${SSH_OPTS[@]}" -o ConnectTimeout=10 -o ServerAliveInterval=30 -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" "sudo bash $remote_path" 2>&1 || rc=$?
 
-  msg_ok "Install script deployed"
+  ssh "${SSH_OPTS[@]}" -o ConnectTimeout=10 -i "$TEMP_SSH_KEY" "${VM_USER}@${VM_IP}" \
+    "rm -f $remote_path" 2>/dev/null || true
 
-  msg_info "Running NUT installer on VM (this may take a few minutes)"
-
-  local nut_install_rc=0
-  NUT_INSTALL_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    -o ServerAliveInterval=30 \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "sudo bash $remote_script_path" 2>&1) || nut_install_rc=$?
-
-  while IFS= read -r line; do
-    [[ "$line" =~ \[NUT-INSTALL-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
-  done <<<"$NUT_INSTALL_OUTPUT"
-
-  if [[ $nut_install_rc -ne 0 ]]; then
-    msg_error "NUT install failed (ssh rc=$nut_install_rc)"
-  fi
-
-  msg_ok "NUT install script completed"
-
-  ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "rm -f $remote_script_path" 2>/dev/null || true
-}
-
-deploy_nut_admin_script() {
-  local remote_script_path="/tmp/nut-admin-install.sh"
-
-  msg_info "Deploying NUT Admin install script to VM"
-
-  local local_script
-  local_script=$(mktemp /tmp/nut-admin-install-XXXXXX.sh)
-  chmod 600 "$local_script"
-  printf '%s\n' "$NUT_ADMIN_SCRIPT" >"$local_script"
-
-  local retry_count=0
-  local max_retries=5
-  while [[ $retry_count -lt $max_retries ]]; do
-    if scp -q -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 \
-      -o GSSAPIAuthentication=no \
-      -o PasswordAuthentication=no \
-      -i "$TEMP_SSH_KEY" \
-      "$local_script" \
-      "${VM_USER}@${VM_IP}:$remote_script_path" 2>/dev/null; then
-      break
-    fi
-    sleep 5
-    ((retry_count++))
-  done
-
-  rm -f "$local_script"
-
-  if [[ $retry_count -eq $max_retries ]]; then
-    msg_error "Failed to copy NUT Admin install script to VM"
-  fi
-
-  ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "chmod +x $remote_script_path" 2>/dev/null || true
-
-  msg_ok "NUT Admin install script deployed"
-
-  msg_info "Running NUT Admin installer on VM"
-
-  NUT_ADMIN_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    -o ServerAliveInterval=30 \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "sudo bash $remote_script_path" 2>&1) || true
-
-  if echo "$NUT_ADMIN_OUTPUT" | grep -q "NUT_ADMIN_OK"; then
-    msg_ok "NUT Admin web interface installed"
-  elif echo "$NUT_ADMIN_OUTPUT" | grep -q "NUT_ADMIN_FAIL"; then
-    msg_warn "NUT Admin web interface failed"
-  else
-    msg_warn "NUT Admin web interface status unknown"
-  fi
-
-  while IFS= read -r line; do
-    [[ "$line" =~ \[NUT-ADMIN-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
-  done <<<"$NUT_ADMIN_OUTPUT"
-
-  ssh -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o GSSAPIAuthentication=no \
-    -o PasswordAuthentication=no \
-    -i "$TEMP_SSH_KEY" \
-    "${VM_USER}@${VM_IP}" \
-    "rm -f $remote_script_path" 2>/dev/null || true
+  return $rc
 }
 
 run_nut_install() {
   build_nut_install_script
-  deploy_nut_script
+  msg_info "Deploying NUT install script to VM"
+  sleep 20
+  local output rc=0
+  output=$(_deploy_and_run "$NUT_INSTALL_SCRIPT" "/tmp/nut-install.sh" "NUT" 10) || rc=$?
+  while IFS= read -r line; do
+    [[ "$line" =~ \[NUT-INSTALL-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
+  done <<<"$output" || true
+  [[ $rc -ne 0 ]] && msg_error "NUT install failed (ssh rc=$rc)"
+  msg_ok "NUT install script completed"
 }
 
 run_nut_admin_install() {
   build_nut_admin_script
-  deploy_nut_admin_script
+  local output
+  output=$(_deploy_and_run "$NUT_ADMIN_SCRIPT" "/tmp/nut-admin-install.sh" "NUT Admin" 5) || true
+  if echo "$output" | grep -q "NUT_ADMIN_OK"; then
+    msg_ok "NUT Admin web interface installed"
+  elif echo "$output" | grep -q "NUT_ADMIN_FAIL"; then
+    msg_warn "NUT Admin web interface failed"
+  else
+    msg_warn "NUT Admin web interface status unknown"
+  fi
+  while IFS= read -r line; do
+    [[ "$line" =~ \[NUT-ADMIN-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
+  done <<<"$output" || true
 }
 
 verify_nut_post_reboot() {
@@ -1242,12 +1132,7 @@ verify_nut_post_reboot() {
   msg_info "Verifying NUT server after reboot"
   while ((retries < max_retries)); do
     local output
-    output=$(ssh -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=5 \
-      -o GSSAPIAuthentication=no \
-      -o PasswordAuthentication=no \
-      -i "$TEMP_SSH_KEY" \
+    output=$(ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 -i "$TEMP_SSH_KEY" \
       "${VM_USER}@${VM_IP}" \
       "upsc '${NUT_UPS_NAME}@localhost' 2>/dev/null || true" 2>/dev/null) || true
     if [[ -n "$output" ]]; then
@@ -1391,22 +1276,12 @@ main() {
   qm reboot "$VM_ID" 2>/dev/null || qm reset "$VM_ID" 2>/dev/null || true
   msg_ok "VM rebooted"
 
-  local reboot_wait=0 reboot_max=90
   msg_info "Waiting for VM to finish rebooting"
-  while ((reboot_wait < reboot_max)); do
-    if timeout 2 bash -c "echo >/dev/tcp/${VM_IP}/22" 2>/dev/null; then
-      msg_ok "VM is reachable after reboot"
-      break
-    fi
-    sleep 5
-    reboot_wait=$((reboot_wait + 5))
-  done
-  if ((reboot_wait >= reboot_max)); then
-    msg_warn "VM is still rebooting — upsc command may not be immediately available"
-  fi
-
-  if ((reboot_wait < reboot_max)); then
+  if wait_port "$VM_IP" 22 90 5 "VM"; then
+    msg_ok "VM is reachable after reboot"
     verify_nut_post_reboot
+  else
+    msg_warn "VM is still rebooting — upsc command may not be immediately available"
   fi
 
   print_summary
