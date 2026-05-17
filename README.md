@@ -71,11 +71,45 @@ bash nut-vm.sh
 
 ### CLI Options
 
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--help` | `-h` | Show help message and exit |
+| `--version` | | Print version (`nut-vm.sh v1.0.0`) and exit |
+| `--debug` | `-d` | Enable `set -x` tracing and show all command output (equivalent to `VERBOSE=yes`) |
+
+### Environment Variables
+
+#### vm/nut-vm.sh
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VERBOSE` | _(unset)_ | Set to `yes` to show full command output. Same as `--debug` but without `set -x` trace. |
+| `NUT_ADMIN_URL_PREFIX` | `https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main` | Base URL for downloading nut-admin files inside the VM. Change to point to a fork or local mirror. |
+
+By default, most commands (`qm`, `ssh`, etc.) are silenced. Set `VERBOSE=yes` or pass `--debug` to reveal output.
+
 ```bash
-bash vm/nut-vm.sh --help     # Show help
-bash vm/nut-vm.sh --version  # Show version
-bash vm/nut-vm.sh --debug    # Enable debug tracing
+bash vm/nut-vm.sh --help            # Show help
+bash vm/nut-vm.sh --version         # Print version
+bash vm/nut-vm.sh --debug           # Trace + verbose output
+VERBOSE=yes bash vm/nut-vm.sh       # Verbose output only (no trace)
+NUT_ADMIN_URL_PREFIX=https://example.com/my-fork bash vm/nut-vm.sh
 ```
+
+#### src/nut-admin/app.py
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NUT_ADMIN_API_KEY` | _(empty)_ | Bearer token for API auth. If empty, auth is disabled (all requests allowed). |
+| `NUT_ADMIN_HOST` | `0.0.0.0` | Listen address for the web server. |
+| `NUT_ADMIN_PORT` | `8081` | Listen port for the web server. |
+
+#### src/nut-admin/install.sh
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NUT_ADMIN_REF` | `7a6e201d…` (pinned sha) | Git commit sha used to construct the download URL when running from curl. Ignored when running from a cloned repo (local files are copied instead). |
+| `NUT_ADMIN_URL` | `https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/${NUT_ADMIN_REF}` | Full download base URL. Overrides `NUT_ADMIN_REF` if set. |
 
 ### Interactive Prompts
 

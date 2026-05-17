@@ -24,6 +24,7 @@ source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxV
 source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/misc/cloud-init.func)
 
 SPINNER_PID=""
+SCRIPT_ERROR_LOG=()
 
 # build.func's msg_error prints but does not call exit; override to add exit 1
 # so that check_root, check_proxmox, and whiptail cancellations abort the script.
@@ -31,8 +32,14 @@ msg_error() {
   [[ -n "${SPINNER_PID:-}" ]] && ps -p "${SPINNER_PID:-}" &>/dev/null && kill "${SPINNER_PID:-}"
   printf "\e[?25h"
   echo -e "${BFR}${CROSS}${RD}${1}${CL}"
+  SCRIPT_ERROR_LOG+=("[ERROR] $1")
   SPINNER_PID=""
   exit 1
+}
+
+msg_warn() {
+  SCRIPT_ERROR_LOG+=("[WARN] $1")
+  echo -e "${BFR}${YW}${1}${CL}"
 }
 
 header_info() {
@@ -774,7 +781,7 @@ except Exception:
 }
 
 #===============================================================================
-# Section 11: NUT Install Heredoc + SCP + SSH Execution
+# Section 11: NUT Install & NUT Admin Deploy
 #===============================================================================
 
 build_nut_install_script() {
@@ -833,7 +840,7 @@ APT_LOCK_MAX=30
 APT_LOCK_WAIT=0
 while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
   if [[ $APT_LOCK_WAIT -ge $APT_LOCK_MAX ]]; then
-    echo "[NUT-INSTALL] Error: apt lock is still held after $((APT_LOCK_MAX * 2)) seconds, aborting."
+    echo "[NUT-INSTALL-ERROR] apt lock is still held after $((APT_LOCK_MAX * 2)) seconds, aborting."
     exit 1
   fi
   sleep 2
@@ -844,7 +851,15 @@ echo "[NUT-INSTALL] Updating packages..."
 apt-get update -qq >/dev/null 2>&1
 
 echo "[NUT-INSTALL] Installing NUT packages..."
-apt-get install -y -qq nut-server nut-client usbutils >/dev/null 2>&1
+apt-get install -y -qq nut-server nut-client usbutils libusb-1.0-0 libsnmp40 libneon27-gnutls libavahi-client3 libfreeipmi17 libupsclient6 >/dev/null 2>&1
+
+echo "[NUT-INSTALL] Creating library symlinks for nut-scanner..."
+ln -sf /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0 /usr/lib/x86_64-linux-gnu/libusb-1.0.so 2>/dev/null || true
+ln -sf /usr/lib/x86_64-linux-gnu/libnetsnmp.so.40 /usr/lib/x86_64-linux-gnu/libnetsnmp.so 2>/dev/null || true
+ln -sf /usr/lib/x86_64-linux-gnu/libneon-gnutls.so.27 /usr/lib/x86_64-linux-gnu/libneon.so 2>/dev/null || true
+ln -sf /usr/lib/x86_64-linux-gnu/libavahi-client.so.3 /usr/lib/x86_64-linux-gnu/libavahi-client.so 2>/dev/null || true
+ln -sf /usr/lib/x86_64-linux-gnu/libfreeipmi.so.17 /usr/lib/x86_64-linux-gnu/libfreeipmi.so 2>/dev/null || true
+ln -sf /usr/lib/x86_64-linux-gnu/libupsclient.so.6 /usr/lib/x86_64-linux-gnu/libupsclient.so 2>/dev/null || true
 
 echo "[NUT-INSTALL] Waiting for UPS device..."
 for i in {1..12}; do
@@ -853,7 +868,7 @@ for i in {1..12}; do
         break
     fi
     if [[ $i -eq 12 ]]; then
-        echo "[NUT-INSTALL] Warning: UPS device not detected after 60 seconds"
+        echo "[NUT-INSTALL-WARN] UPS device not detected after 60 seconds"
     fi
     sleep 5
 done
@@ -898,20 +913,24 @@ mkdir -p /var/run/nut
 chown nut:nut /var/run/nut
 
 echo "[NUT-INSTALL] Starting NUT services..."
-systemctl enable nut-driver nut-server nut-monitor >/dev/null 2>&1
-systemctl restart nut-driver >/dev/null 2>&1
-sleep 3
-systemctl restart nut-server nut-monitor >/dev/null 2>&1
+set +e
 
-echo "[NUT-INSTALL] Testing NUT connection..."
-for i in $(seq 1 12); do
-    if upsc "${UPS_NAME}@localhost" &>/dev/null; then
-        echo "NUT_TEST_OK"
-        break
-    fi
-    [[ $i -eq 12 ]] && echo "NUT_TEST_FAIL"
-    sleep 5
-done
+if systemctl list-unit-files 'nut-driver-enumerator.service' 2>/dev/null | grep -q 'nut-driver-enumerator'; then
+  systemctl daemon-reload
+  ERR=$(systemctl enable nut-server nut-monitor nut-driver-enumerator.service nut-driver-enumerator.path nut-driver-target 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart nut-driver-enumerator.service 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver-enumerator restart failed: ${ERR}"
+elif systemctl list-unit-files 'nut-driver@.service' 2>/dev/null | grep -q 'nut-driver@'; then
+  systemctl daemon-reload
+  ERR=$(systemctl enable "nut-driver@${UPS_NAME}" nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart "nut-driver@${UPS_NAME}" 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver@${UPS_NAME} restart failed: ${ERR}"
+else
+  ERR=$(systemctl enable nut-driver nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] Failed to enable NUT services: ${ERR}"
+  ERR=$(systemctl restart nut-driver 2>&1) || echo "[NUT-INSTALL-WARN] nut-driver restart failed: ${ERR}"
+fi
+
+sleep 3
+ERR=$(systemctl restart nut-server nut-monitor 2>&1) || echo "[NUT-INSTALL-WARN] nut-server/nut-monitor restart failed: ${ERR}"
+set -e
 
 echo "[NUT-INSTALL] Complete!"
 NUT_SCRIPT
@@ -947,6 +966,109 @@ script = script.replace('__UPSD_USERS_B64__', os.environ['PY_UPSD_USERS_B64'])
 script = script.replace('__UPSMON_CONF_B64__', os.environ['PY_UPSMON_CONF_B64'])
 print(script, end='')
 " <<<"$NUT_INSTALL_SCRIPT"
+  )
+}
+
+build_nut_admin_script() {
+  local nut_admin_url_prefix
+  nut_admin_url_prefix="${NUT_ADMIN_URL_PREFIX:-https://raw.githubusercontent.com/JuanCF/proxmox-nut-server/main}"
+
+  NUT_ADMIN_SCRIPT=$(
+    cat <<'NUT_ADMIN_HEREDOC'
+#!/usr/bin/env bash
+NUT_ADMIN_URL="__NUT_ADMIN_URL_PREFIX__"
+NUT_ADMIN_FAIL=0
+NUT_ADMIN_ERROR_LOG=""
+
+echo "[NUT-ADMIN] Installing NUT Admin web interface..."
+
+echo "[NUT-ADMIN] Installing dependencies..."
+if ! apt-get update -qq >/dev/null 2>&1; then
+  NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] apt-get update failed\n"
+  NUT_ADMIN_FAIL=1
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]] && ! apt-get install -y -qq python3-venv python3-pip curl >/dev/null 2>&1; then
+  NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] apt-get install failed\n"
+  NUT_ADMIN_FAIL=1
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Creating application directory..."
+  mkdir -p /opt/nut-admin/static
+
+  echo "[NUT-ADMIN] Downloading admin files..."
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/app.py" -o /opt/nut-admin/app.py; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] Failed to download app.py\n"
+    NUT_ADMIN_FAIL=1
+  fi
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/static/index.html" -o /opt/nut-admin/static/index.html; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] Failed to download index.html\n"
+    NUT_ADMIN_FAIL=1
+  fi
+  if ! curl -fsSL "${NUT_ADMIN_URL}/src/nut-admin/nut-admin.service" -o /etc/systemd/system/nut-admin.service; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] Failed to download nut-admin.service\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Setting up Python virtual environment..."
+  if ! python3 -m venv /opt/nut-admin/venv >/dev/null 2>&1; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] python3 -m venv failed\n"
+    NUT_ADMIN_FAIL=1
+  elif ! /opt/nut-admin/venv/bin/pip install --quiet flask >/dev/null 2>&1; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] pip install flask failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Enabling systemd service..."
+  if ! systemctl daemon-reload; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] systemctl daemon-reload failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  if ! systemctl enable nut-admin; then
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] systemctl enable nut-admin failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -eq 0 ]]; then
+  echo "[NUT-ADMIN] Starting service..."
+  if systemctl restart nut-admin; then
+    VM_IP="$(hostname -I | awk '{print $1}')"
+    echo ""
+    echo "NUT Admin web interface installed and running."
+    echo "URL: http://${VM_IP}:8081"
+    echo "NUT_ADMIN_OK"
+  else
+    NUT_ADMIN_ERROR_LOG+="[NUT-ADMIN-ERROR] systemctl restart nut-admin failed\n"
+    NUT_ADMIN_FAIL=1
+  fi
+fi
+
+if [[ $NUT_ADMIN_FAIL -ne 0 ]]; then
+  echo "NUT_ADMIN_FAIL"
+  echo "NUT_ADMIN_ERROR_LOG_START"
+  echo -e "$NUT_ADMIN_ERROR_LOG"
+  echo "NUT_ADMIN_ERROR_LOG_END"
+fi
+NUT_ADMIN_HEREDOC
+  )
+
+  NUT_ADMIN_SCRIPT=$(
+    export PY_NUT_ADMIN_URL_PREFIX="$nut_admin_url_prefix"
+    python3 -c "
+import os, sys
+script = sys.stdin.read()
+script = script.replace('__NUT_ADMIN_URL_PREFIX__', os.environ['PY_NUT_ADMIN_URL_PREFIX'])
+print(script, end='')
+" <<<"$NUT_ADMIN_SCRIPT"
   )
 }
 
@@ -998,7 +1120,83 @@ deploy_nut_script() {
 
   msg_info "Running NUT installer on VM (this may take a few minutes)"
 
+  local nut_install_rc=0
   NUT_INSTALL_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 \
+    -o ServerAliveInterval=30 \
+    -o GSSAPIAuthentication=no \
+    -o PasswordAuthentication=no \
+    -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" \
+    "sudo bash $remote_script_path" 2>&1) || nut_install_rc=$?
+
+  while IFS= read -r line; do
+    [[ "$line" =~ \[NUT-INSTALL-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
+  done <<<"$NUT_INSTALL_OUTPUT"
+
+  if [[ $nut_install_rc -ne 0 ]]; then
+    msg_error "NUT install failed (ssh rc=$nut_install_rc)"
+  fi
+
+  msg_ok "NUT install script completed"
+
+  ssh -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o GSSAPIAuthentication=no \
+    -o PasswordAuthentication=no \
+    -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" \
+    "rm -f $remote_script_path" 2>/dev/null || true
+}
+
+deploy_nut_admin_script() {
+  local remote_script_path="/tmp/nut-admin-install.sh"
+
+  msg_info "Deploying NUT Admin install script to VM"
+
+  local local_script
+  local_script=$(mktemp /tmp/nut-admin-install-XXXXXX.sh)
+  chmod 600 "$local_script"
+  printf '%s\n' "$NUT_ADMIN_SCRIPT" >"$local_script"
+
+  local retry_count=0
+  local max_retries=5
+  while [[ $retry_count -lt $max_retries ]]; do
+    if scp -q -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      -o GSSAPIAuthentication=no \
+      -o PasswordAuthentication=no \
+      -i "$TEMP_SSH_KEY" \
+      "$local_script" \
+      "${VM_USER}@${VM_IP}:$remote_script_path" 2>/dev/null; then
+      break
+    fi
+    sleep 5
+    ((retry_count++))
+  done
+
+  rm -f "$local_script"
+
+  if [[ $retry_count -eq $max_retries ]]; then
+    msg_error "Failed to copy NUT Admin install script to VM"
+  fi
+
+  ssh -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 \
+    -o GSSAPIAuthentication=no \
+    -o PasswordAuthentication=no \
+    -i "$TEMP_SSH_KEY" \
+    "${VM_USER}@${VM_IP}" \
+    "chmod +x $remote_script_path" 2>/dev/null || true
+
+  msg_ok "NUT Admin install script deployed"
+
+  msg_info "Running NUT Admin installer on VM"
+
+  NUT_ADMIN_OUTPUT=$(ssh -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=10 \
     -o ServerAliveInterval=30 \
@@ -1008,13 +1206,17 @@ deploy_nut_script() {
     "${VM_USER}@${VM_IP}" \
     "sudo bash $remote_script_path" 2>&1) || true
 
-  if echo "$NUT_INSTALL_OUTPUT" | grep -q "NUT_TEST_OK"; then
-    NUT_TEST_RESULT="OK"
-    msg_ok "NUT installed and tested successfully"
+  if echo "$NUT_ADMIN_OUTPUT" | grep -q "NUT_ADMIN_OK"; then
+    msg_ok "NUT Admin web interface installed"
+  elif echo "$NUT_ADMIN_OUTPUT" | grep -q "NUT_ADMIN_FAIL"; then
+    msg_warn "NUT Admin web interface failed"
   else
-    NUT_TEST_RESULT="FAIL"
-    msg_warn "NUT test failed (check driver compatibility)"
+    msg_warn "NUT Admin web interface status unknown"
   fi
+
+  while IFS= read -r line; do
+    [[ "$line" =~ \[NUT-ADMIN-(WARN|ERROR)\] ]] && SCRIPT_ERROR_LOG+=("$line")
+  done <<<"$NUT_ADMIN_OUTPUT"
 
   ssh -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null \
@@ -1023,13 +1225,16 @@ deploy_nut_script() {
     -i "$TEMP_SSH_KEY" \
     "${VM_USER}@${VM_IP}" \
     "rm -f $remote_script_path" 2>/dev/null || true
-
-  msg_ok "NUT installation complete"
 }
 
 run_nut_install() {
   build_nut_install_script
   deploy_nut_script
+}
+
+run_nut_admin_install() {
+  build_nut_admin_script
+  deploy_nut_admin_script
 }
 
 verify_nut_post_reboot() {
@@ -1103,6 +1308,14 @@ print_summary() {
       echo -e "  ${DGN}${pwd_entry}${CL}"
     done
   fi
+
+  if [[ "${VERBOSE:-}" == "yes" && ${#SCRIPT_ERROR_LOG[@]} -gt 0 ]]; then
+    echo
+    echo -e "${YW}Debug - Script error/warning log:${CL}"
+    for entry in "${SCRIPT_ERROR_LOG[@]}"; do
+      echo -e "  ${entry}"
+    done
+  fi
   echo
 }
 
@@ -1172,6 +1385,7 @@ main() {
   get_vm_ip
   wait_ssh "$VM_IP" 22
   run_nut_install
+  run_nut_admin_install
 
   msg_info "Rebooting VM ${VM_ID} to apply NUT configuration"
   qm reboot "$VM_ID" 2>/dev/null || qm reset "$VM_ID" 2>/dev/null || true

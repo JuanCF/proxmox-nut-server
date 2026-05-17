@@ -1,0 +1,165 @@
+# =============================================================================
+# .coderabbit.yaml — Configuration for CodeRabbit AI reviews
+# =============================================================================
+
+# Language is English (US) — all code comments, docs, and UI already use English.
+language: en-US
+
+reviews:
+  # ---------------------------------------------------------------------------
+  # profile: "assertive" because this is an infra/ops repo with root-level
+  # shell scripts and a security-sensitive Flask app. False negatives in
+  # security and correctness reviews are more dangerous than false positives.
+  # ---------------------------------------------------------------------------
+  profile: assertive
+
+  # ---------------------------------------------------------------------------
+  # Global review instructions — encode domain knowledge and suppress noise
+  # from issues already caught by linters.
+  # ---------------------------------------------------------------------------
+  instructions: |
+    ## Stack overview
+    This repo has two components:
+    1. **vm/nut-vm.sh** — Bash script run as root on a Proxmox host. Sources
+       `build.func` and `cloud-init.func` at runtime via curl from
+       community-scripts/ProxmoxVED. Reimplements spinner/colors/msg_* because
+       `build.func`'s `msg_error` does not call `exit` — the local override
+       adds `exit 1`. This is intentional; do NOT suggest replacing it.
+    2. **src/nut-admin/** — Flask SPA (app.py + static/index.html) that runs
+       inside the VM on port 8081 as a systemd service. Manages NUT config
+       files in /etc/nut/ via a REST API.
+
+    ## What NOT to comment on (linters already enforce these)
+    - Shell quoting/bracing issues — shellcheck catches these via `make lint`
+    - Shell indentation style — shfmt enforces 2-space indentation via `make fmt`
+    - Python syntax errors — `make lint-python` (py_compile) catches these
+    - Missing test coverage for parser roundtrips — `tests/test_parsers.py`
+      covers parse/serialize roundtrips; flag only regressions, not missing cases
+    - Sourcing `build.func` / `cloud-init.func` via curl — shellcheck is
+      intentionally disabled for these via `# shellcheck disable=SC1090`
+      and `.shellcheckrc` sets `external-sources=true`
+
+    ## Domain-specific patterns to validate
+    - **Password handling**: NUT passwords are base64-encoded then embedded in
+      a heredoc and substituted via Python `str.replace`. Never suggest
+      switching to shell variable expansion for passwords — special chars
+      ($, `, \) will break. The base64+Python approach is correct.
+    - **Atomic config writes**: `write_file()` in app.py uses `tempfile.mkstemp`
+      + `os.replace`. Do not suggest simpler `open(..., 'w')` patterns.
+    - **IDENTIFIER_REGEX**: NUT section names and usernames are validated with
+      `^[A-Za-z][A-Za-z0-9._-]{0,127}$`. Flag any route that accepts a name
+      parameter without this check.
+    - **Duplicate UPS models**: `detect_ups()` falls back to bus-port notation
+      (`host=4-1`) when multiple devices share the same vendor:product ID.
+      This is intentional, not a bug.
+    - **Image caching**: The cloud image is intentionally NOT deleted after
+      import. It stays at `/var/lib/vz/template/iso` for re-runs. Do not
+      suggest deleting it.
+    - **msg_error exit behavior**: `msg_error` calls `exit 1`. This is
+      deliberate — `build.func`'s version only logs and returns. Never suggest
+      replacing with the community-scripts `msg_error`.
+    - **Cloud-init vendor snippet**: The password is embedded in
+      `/var/lib/vz/snippets/` (mode 600). This is a documented residual risk.
+      Do not suggest removing it without offering an alternative for first-boot
+      password injection.
+    - **NUT driver service name**: Probes `nut-driver-enumerator`, then
+      `nut-driver@`, then `nut-driver` — handles across Ubuntu releases.
+      Do not simplify to a single service name.
+    - **Temporary SSH keys**: Generated in `/tmp/nut-setup-$$/` and cleaned up
+      via `trap EXIT`. Flag if cleanup is incomplete.
+
+  # ---------------------------------------------------------------------------
+  # path_instructions: folder-specific review rules
+  # ---------------------------------------------------------------------------
+  path_instructions:
+    # Shell script run as root on Proxmox hosts. Security-critical:
+    # handles passwords, SSH keys, qm commands, cloud-init injection.
+    - path: vm/**.sh
+      instructions: |
+        - This script runs as root on Proxmox. Flag any unquoted variable
+          in a command that reaches the system (qm, ssh, scp, pip).
+          shellcheck may miss these in eval-like contexts.
+        - Never suggest replacing the local `msg_error` with the one from
+          build.func — they have different exit behavior.
+        - Passwords in NUT configs are substituted via Python `str.replace`
+          from env vars, NOT shell variable expansion. This is correct for
+          handling special characters. Do not suggest `sed` or `envsubst`.
+        - Verify that any new whiptail prompt has `|| msg_error "Cancelled
+          by user"` — users pressing Cancel must abort, not continue.
+        - Verify `trap EXIT` cleanup covers any new temp files or keys.
+        - Flag new `curl | sh` patterns — the script only sources
+          `build.func` and `cloud-init.func` from the community-scripts
+          org; new external fetches need a checksum or pinned commit.
+
+    # Flask API app that writes /etc/nut/ configs and runs system commands.
+    # Auth: Bearer token via NUT_ADMIN_API_KEY env var (disabled if empty).
+    - path: src/nut-admin/app.py
+      instructions: |
+        - Auth is Bearer token via `NUT_ADMIN_API_KEY` env var. If empty,
+          auth is disabled (all requests allowed). Flag any new route that
+          lacks the `@require_admin` decorator.
+        - Config writes must use `write_file()` (atomic tempfile + os.replace).
+          Never suggest `open(path, 'w')` for NUT config files.
+        - All name/path parameters must be validated with `IDENTIFIER_REGEX`
+          or checked against `ALLOWED_CONFIGS`. Flag any unvalidated input
+          passed to `os.path.join` or `subprocess.run`.
+        - `upsd.users` is read-only via the `/api/config/` endpoint (enforced).
+          Flag any PR that removes this guard.
+        - Passwords are masked (••••••) in API responses. Never suggest logging
+          or returning plaintext passwords unnecessarily.
+        - `run_cmd` uses `subprocess.run` with a timeout. Flag any new
+          subprocess call that bypasses this (e.g., `os.system`, `shell=True`).
+
+    # Static SPA — no build step, no framework, vanilla HTML/CSS/JS.
+    - path: src/nut-admin/static/**
+      instructions: |
+        - This is a vanilla SPA with no build step. Do not suggest
+          minification, bundling, or framework migrations.
+        - XSS: the `esc()` function handles HTML entity encoding. Flag any
+          new innerHTML insertion that doesn't go through `esc()`.
+        - API calls use `fetch('/api/...')` — relative URLs are correct for
+          same-origin deployment. Do not suggest adding base URL config.
+
+    # Install script for nut-admin inside the VM.
+    - path: src/nut-admin/install.sh
+      instructions: |
+        - This runs as root inside the VM. Flag any `curl | sh` without
+          checksum verification. The current script pins `NUT_ADMIN_REF`
+          (a git sha) — flag changes that use a branch name instead.
+        - The script safely falls back between local files and remote curl.
+          Maintain this dual-mode behavior.
+
+    # Parser roundtrip tests.
+    - path: src/nut-admin/tests/**
+      instructions: |
+        - Tests import from `app` (not `src.nut-admin.app`) because they
+          run from `src/nut-admin/`. Do not suggest adding `__init__.py`
+          or restructuring the import path.
+        - Focus on: roundtrip correctness (parse → serialize → parse),
+          edge cases in NUT config syntax (comments, blank lines, extra
+          directives), and not on test framework choices.
+
+  # ---------------------------------------------------------------------------
+  # path_filters: exclude generated/vendored/cache directories from review
+  # ---------------------------------------------------------------------------
+  path_filters:
+    - "!**/.pytest_cache/**"
+    - "!**/__pycache__/**"
+    - "!**/node_modules/**"
+    - "!**/.agents/**"
+    - "!**/.git/**"
+
+  # ---------------------------------------------------------------------------
+  # auto_review: enable on PRs, disable on drafts unless explicit.
+  # ---------------------------------------------------------------------------
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+
+# =============================================================================
+# knowledge_base: auto-detect patterns from PR history
+# =============================================================================
+knowledge_base:
+  learnings:
+    scope: auto

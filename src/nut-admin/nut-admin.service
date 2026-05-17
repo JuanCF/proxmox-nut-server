@@ -1,0 +1,17 @@
+[Unit]
+Description=NUT Admin Web Interface
+After=network.target nut-server.service
+Wants=nut-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/nut-admin
+ExecStart=/opt/nut-admin/venv/bin/python /opt/nut-admin/app.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
