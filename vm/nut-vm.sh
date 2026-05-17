@@ -705,7 +705,8 @@ wait_port() {
   local host="$1" port="${2:-22}" timeout_sec="${3:-$SSH_TIMEOUT}" sleep_sec="${4:-5}" label="${5:-}"
   local start=$SECONDS last_report=0
   while ((SECONDS - start < timeout_sec)); do
-    if timeout 2 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
+    # shellcheck disable=SC2016
+    if timeout 2 bash -c 'echo >/dev/tcp/$1/$2' _ "$host" "$port" 2>/dev/null; then
       return 0
     fi
     local elapsed=$((SECONDS - start))
@@ -1067,7 +1068,7 @@ print(script, end='')
 _deploy_and_run() {
   local script_content="$1" remote_path="$2" desc="$3" retry_sleep="${4:-10}"
   local tmp_script retry_count=0 max_retries=5
-  tmp_script=$(mktemp "/tmp/${desc// /-}-XXXXXX.sh")
+  tmp_script=$(mktemp "${TEMP_KEY_DIR}/${desc// /-}-XXXXXX.sh")
   chmod 600 "$tmp_script"
   printf '%s\n' "$script_content" >"$tmp_script"
 
