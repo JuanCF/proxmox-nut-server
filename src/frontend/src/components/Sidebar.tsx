@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react';
 import { NavLink } from 'react-router-dom';
 import { APP_VERSION } from '../constants';
-import { useTheme } from '../theme';
-import { useModal } from './Modal';
-import { useAuth } from '../AuthProvider';
+import { useTheme } from '../useTheme';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import ThemeSettings from './ThemeSettings';
 import LogoMark from './LogoMark';
 

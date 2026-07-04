@@ -16,6 +16,14 @@ html, body {
   min-height: 100vh;
 }
 
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-muted);
+}
+
 h2 {
   margin: 0 0 1.25rem;
   font-size: 0.8rem;

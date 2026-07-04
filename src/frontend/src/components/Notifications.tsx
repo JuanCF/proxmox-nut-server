@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { API, NOTIFICATION_EVENTS, TIMING_KEYS, FLAGS, ROLES } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
-import { useAuth } from '../AuthProvider';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import RestartPromptModal from './RestartPromptModal';
 import type { UpsDevice, UpsmonConfig, MonitorRow, CommandResult } from '../types';
 

@@ -1,25 +1,9 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { ThemeMode } from './types';
-
-interface ThemeConfig {
-  mode: ThemeMode;
-  lightStart: number;
-  lightEnd: number;
-}
-
-interface ThemeContextValue {
-  theme: 'light' | 'dark';
-  toggleTheme: () => void;
-  mode: ThemeMode;
-  lightStart: number;
-  lightEnd: number;
-  setMode: (mode: ThemeMode) => void;
-  updateConfig: (partial: Partial<ThemeConfig>) => void;
-}
+import { ThemeContext, isLightHour, type ThemeConfig, type ThemeContextValue } from './useTheme';
 
 const STORAGE_KEY = 'nutwatch-theme';
-const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function loadConfig(): ThemeConfig {
   try {
@@ -39,13 +23,6 @@ function loadConfig(): ThemeConfig {
     }
   } catch {}
   return { mode: 'system', lightStart: 6, lightEnd: 20 };
-}
-
-export function isLightHour(start: number, end: number): boolean {
-  const now = new Date().getHours();
-  if (start === end) return false;
-  if (start < end) return now >= start && now < end;
-  return now >= start || now < end;
 }
 
 function computeTheme(mode: ThemeMode, lightStart: number, lightEnd: number): 'light' | 'dark' {
@@ -108,10 +85,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-}
-
-export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
-  return ctx;
 }

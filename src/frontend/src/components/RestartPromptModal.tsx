@@ -1,4 +1,4 @@
-import { useModal } from './Modal';
+import { useModal } from './useModal';
 import type { ReactNode } from 'react';
 
 interface RestartPromptModalProps {

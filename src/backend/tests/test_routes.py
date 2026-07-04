@@ -1,6 +1,3 @@
-import os
-
-import pytest
 from flask import Flask
 
 import routes.history
@@ -30,14 +27,6 @@ def _register_all(app):
     app.register_blueprint(routes.wol.wol_bp)
     app.register_blueprint(routes.history.history_bp)
     return app
-
-
-@pytest.fixture(autouse=True)
-def no_auth(tmp_path, monkeypatch):
-    # Fresh, empty auth DB per test -> bootstrap-open mode (mirrors the old
-    # no-auth-configured default of fully open access).
-    monkeypatch.setattr("services.auth_db.AUTH_DB", os.path.join(tmp_path, "test_auth.db"))
-    monkeypatch.setattr("services.auth_db._schema_ready_for", None)
 
 
 def _create_admin_bearer():
@@ -875,6 +864,15 @@ def test_viewer_cannot_write_hook():
         assert resp.status_code == 403
 
 
+def test_viewer_cannot_read_hook_content(monkeypatch):
+    monkeypatch.setattr("routes.hooks.get_hook", lambda n, e: "echo hi")
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/hooks/myups/ONLINE", headers=headers)
+        assert resp.status_code == 403
+
+
 def test_viewer_can_read_config_file(monkeypatch):
     monkeypatch.setattr("routes.system.get_config", lambda f: "content")
     headers = _viewer_headers()
@@ -957,6 +955,15 @@ def test_viewer_cannot_wake_target():
     app = _register_all(_make_app())
     with app.test_client() as c:
         resp = c.post("/api/wol/targets/pc1/wake", headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_cannot_scan_network_hosts(monkeypatch):
+    monkeypatch.setattr("routes.wol.wol_service.scan_network_hosts", lambda: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/wol/network-hosts", headers=headers)
         assert resp.status_code == 403
 
 

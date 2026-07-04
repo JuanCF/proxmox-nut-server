@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { API, NOTIFICATION_EVENTS } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
-import { useAuth } from '../AuthProvider';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import { tryAlert } from '../utils/alerts';
 import type { WolTargetsMap, WolTargetWithName, WolMapping, UpsDevice } from '../types';
 

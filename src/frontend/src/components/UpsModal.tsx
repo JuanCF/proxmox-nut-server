@@ -2,8 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { API, DEFAULTS, POLL_INTERVAL_MIN } from '../constants';
 import { parseDirectives, formatDirectives } from '../utils/directives';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
 import RestartPromptModal from './RestartPromptModal';
 import type { UpsDevice, ScanDevice, CommandResult } from '../types';
 

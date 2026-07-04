@@ -1,6 +1,3 @@
-import os
-
-import pytest
 from flask import Flask, session
 
 from services import auth_db
@@ -11,13 +8,6 @@ def _make_app():
     app.config["TESTING"] = True
     app.secret_key = "test-secret"
     return app
-
-
-@pytest.fixture(autouse=True)
-def _patch_auth_db(tmp_path, monkeypatch):
-    db_path = os.path.join(tmp_path, "test_auth.db")
-    monkeypatch.setattr("services.auth_db.AUTH_DB", db_path)
-    monkeypatch.setattr("services.auth_db._schema_ready_for", None)
 
 
 def _make_admin():

@@ -18,7 +18,8 @@ import Login from './components/Login';
 import { ThemeProvider } from './theme';
 import { ModalProvider } from './components/Modal';
 import { ConfirmProvider } from './components/ConfirmDialog';
-import { AuthProvider, useAuth } from './AuthProvider';
+import { AuthProvider } from './AuthProvider';
+import { useAuth } from './useAuth';
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -95,7 +96,7 @@ function AppLayout() {
 function AuthGate() {
   const { loading, bootstrapped, skipped, account } = useAuth();
 
-  if (loading) return null;
+  if (loading) return <div className="app-loading">Loading…</div>;
   if (!bootstrapped && !skipped) return <Setup />;
   if (bootstrapped && !account) return <Login />;
   return <AppLayout />;

@@ -233,15 +233,25 @@ def update_account(account_id: int, role: str | None = None, is_active: bool | N
         return None
     conn = get_db()
     try:
+        # BEGIN IMMEDIATE takes the write lock up front so the admin-count
+        # guard and the update it protects happen atomically — otherwise two
+        # concurrent demotions could each read a count of >=2 before either
+        # commits and both proceed, leaving zero active admins.
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", [account_id]).fetchone()
         if not row:
+            conn.rollback()
             return None
         # Guard the bootstrap invariant: never let the last active admin be
         # demoted or deactivated, which would lock everyone out of admin access.
         demoting = role is not None and role != "admin"
         deactivating = is_active is False
         if (demoting or deactivating) and row["role"] == "admin" and row["is_active"]:
-            if count_active_admins() <= 1:
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin' AND is_active = 1"
+            ).fetchone()["n"]
+            if count <= 1:
+                conn.rollback()
                 raise ValueError("cannot demote or deactivate the last active admin")
         if role is not None:
             conn.execute("UPDATE accounts SET role = ? WHERE id = ?", [role, account_id])

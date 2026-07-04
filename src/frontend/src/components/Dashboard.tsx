@@ -7,9 +7,9 @@ import Badge from './Badge';
 import Gauge from './Gauge';
 import Skeleton from './Skeleton';
 import RestartPromptModal from './RestartPromptModal';
-import { useModal } from './Modal';
-import { useConfirm } from './ConfirmDialog';
-import { useAuth } from '../AuthProvider';
+import { useModal } from './useModal';
+import { useConfirm } from './useConfirm';
+import { useAuth } from '../useAuth';
 import { errorMessage } from '../utils/alerts';
 import type { UpsDevice, UpsDetailData, ServicesMap, SystemResources, CommandResult } from '../types';
 

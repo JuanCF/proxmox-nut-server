@@ -1,15 +1,6 @@
-import os
-
 import pytest
 
 from services import auth_db
-
-
-@pytest.fixture(autouse=True)
-def _patch_db(tmp_path, monkeypatch):
-    db_path = os.path.join(tmp_path, "test_auth.db")
-    monkeypatch.setattr("services.auth_db.AUTH_DB", db_path)
-    monkeypatch.setattr("services.auth_db._schema_ready_for", None)
 
 
 def test_get_or_create_secret_key_persists():
@@ -70,9 +61,9 @@ def test_update_account_role_and_password():
 
 def test_cannot_deactivate_last_active_admin():
     admin, _ = auth_db.create_account("admin", "pw123456", role="admin")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot demote or deactivate the last active admin"):
         auth_db.update_account(admin["id"], is_active=False)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot demote or deactivate the last active admin"):
         auth_db.update_account(admin["id"], role="viewer")
     # Password-only change on the last admin is still allowed.
     assert auth_db.update_account(admin["id"], password="newpass123") is not None

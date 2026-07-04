@@ -1,5 +1,5 @@
-import { useModal } from './Modal';
-import { useTheme, isLightHour } from '../theme';
+import { useModal } from './useModal';
+import { useTheme, isLightHour } from '../useTheme';
 import type { ThemeMode } from '../types';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);

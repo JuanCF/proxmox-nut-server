@@ -1,14 +1,6 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { ReactNode } from 'react';
-
-interface ModalContextValue {
-  openModal: (jsx: ReactNode) => void;
-  closeModal: () => void;
-  closeThen: (fn: () => void) => () => void;
-  modalContent: ReactNode;
-}
-
-const ModalContext = createContext<ModalContextValue | null>(null);
+import { ModalContext } from './useModal';
 
 export function ModalProvider({ children }: { children: ReactNode }) {
   const [content, setContent] = useState<ReactNode>(null);
@@ -52,10 +44,4 @@ export function ModalProvider({ children }: { children: ReactNode }) {
       </div>
     </ModalContext.Provider>
   );
-}
-
-export function useModal(): ModalContextValue {
-  const ctx = useContext(ModalContext);
-  if (!ctx) throw new Error('useModal must be used within ModalProvider');
-  return ctx;
 }

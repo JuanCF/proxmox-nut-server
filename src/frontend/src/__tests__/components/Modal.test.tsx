@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ModalProvider, useModal } from '../../components/Modal';
+import { ModalProvider } from '../../components/Modal';
+import { useModal } from '../../components/useModal';
 
 function ModalOpener() {
   const { openModal, closeModal } = useModal();

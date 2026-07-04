@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from flask import Flask
 
@@ -16,10 +14,7 @@ def _make_app():
 
 
 @pytest.fixture(autouse=True)
-def _patch_auth_db(tmp_path, monkeypatch):
-    db_path = os.path.join(tmp_path, "test_auth.db")
-    monkeypatch.setattr("services.auth_db.AUTH_DB", db_path)
-    monkeypatch.setattr("services.auth_db._schema_ready_for", None)
+def _clear_login_attempts():
     _login_attempts.clear()
 
 

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { API, CONFIG_FILENAMES, READONLY_CONFIG } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
-import { useAuth } from '../AuthProvider';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import RestartPromptModal from './RestartPromptModal';
 import type { CommandResult } from '../types';
 

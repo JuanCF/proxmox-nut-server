@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { API } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
-import { useAuth } from '../AuthProvider';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import UpsCard from './UpsCard';
 import UpsModal from './UpsModal';
 import ServiceStatus from './ServiceStatus';

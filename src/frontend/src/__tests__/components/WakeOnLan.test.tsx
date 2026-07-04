@@ -19,10 +19,13 @@ const ADMIN_ACCOUNT = { id: 1, username: 'admin', role: 'admin', is_active: true
 
 // AuthProvider fetches /auth/status + /auth/me on mount; every test needs to
 // answer those regardless of what it's testing. Defaults to an admin session.
-function withAuth(handler: (url: string) => Promise<unknown>): (url: string) => Promise<unknown> {
+function withAuth(
+  handler: (url: string) => Promise<unknown>,
+  account: unknown = ADMIN_ACCOUNT
+): (url: string) => Promise<unknown> {
   return (url: string) => {
     if (url === API.AUTH_STATUS) return Promise.resolve({ bootstrapped: true, authenticated: true });
-    if (url === API.AUTH_ME) return Promise.resolve(ADMIN_ACCOUNT);
+    if (url === API.AUTH_ME) return Promise.resolve(account);
     return handler(url);
   };
 }
@@ -233,9 +236,7 @@ describe('WakeOnLan', () => {
 
   it('hides mutating controls for a viewer account', async () => {
     const VIEWER_ACCOUNT = { id: 2, username: 'bob', role: 'viewer', is_active: true, created_at: 0, last_login_at: null };
-    mockApi.mockImplementation((url: string) => {
-      if (url === API.AUTH_STATUS) return Promise.resolve({ bootstrapped: true, authenticated: true });
-      if (url === API.AUTH_ME) return Promise.resolve(VIEWER_ACCOUNT);
+    mockApi.mockImplementation(withAuth((url: string) => {
       if (url === API.WOL_TARGETS) return Promise.resolve({
         targets: { server: { mac: 'AA:BB:CC:DD:EE:FF', broadcast: '255.255.255.255', description: 'Main server' } },
       });
@@ -243,7 +244,7 @@ describe('WakeOnLan', () => {
       if (url === API.UPS) return Promise.resolve([]);
       if (url === API.WOL_NETWORK_HOSTS) return Promise.resolve({ hosts: [] });
       return Promise.resolve(null);
-    });
+    }, VIEWER_ACCOUNT));
 
     renderWoL();
     await waitFor(() => expect(screen.getByText('server')).toBeInTheDocument());

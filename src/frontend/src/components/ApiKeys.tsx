@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
 import { API } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
 import { tryAlert } from '../utils/alerts';
 import ApiKeyModal from './ApiKeyModal';
 import type { ApiKey } from '../types';

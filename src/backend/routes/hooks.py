@@ -16,7 +16,7 @@ def list_hooks_handler(upsname):
 
 
 @hooks_bp.route("/api/hooks/<upsname>/<event>", methods=["GET"])
-@require_auth
+@require_admin
 def get_hook_handler(upsname, event):
     if not IDENTIFIER_REGEX.match(upsname):
         return jsonify({"error": "invalid ups name"}), 400

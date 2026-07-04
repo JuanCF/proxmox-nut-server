@@ -129,6 +129,6 @@ def delete_mapping(index):
 
 
 @wol_bp.route("/api/wol/network-hosts", methods=["GET"])
-@require_auth
+@require_admin
 def list_network_hosts():
     return jsonify({"hosts": wol_service.scan_network_hosts()})

@@ -1,27 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, setUnauthorizedHandler } from './api';
 import { API } from './constants';
 import type { Account } from './types';
+import { AuthContext, type AuthContextValue } from './useAuth';
 
 interface AuthStatus {
   bootstrapped: boolean;
   authenticated: boolean;
 }
 
-interface AuthContextValue {
-  loading: boolean;
-  bootstrapped: boolean;
-  skipped: boolean;
-  account: Account | null;
-  isAdmin: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  setupAdmin: (username: string, password: string) => Promise<void>;
-  skipSetup: () => void;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
 const SKIP_KEY = 'nutwatch-setup-skipped';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -99,10 +87,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

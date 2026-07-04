@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useAuth } from '../AuthProvider';
+import { useAuth } from '../useAuth';
 import { errorMessage } from '../utils/alerts';
 import LogoMark from './LogoMark';
 

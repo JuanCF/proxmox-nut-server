@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ThemeProvider, useTheme, isLightHour } from '../../theme';
+import { ThemeProvider } from '../../theme';
+import { useTheme, isLightHour } from '../../useTheme';
 
 function ThemeTester() {
   const { theme, mode, lightStart, lightEnd, setMode, toggleTheme, updateConfig } = useTheme();
