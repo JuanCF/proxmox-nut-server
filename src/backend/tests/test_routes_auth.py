@@ -14,7 +14,7 @@ def _make_app():
 
 
 @pytest.fixture(autouse=True)
-def _clear_login_attempts():
+def _clear_login_attempts() -> None:
     _login_attempts.clear()
 
 
