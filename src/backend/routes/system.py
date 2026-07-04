@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin, require_admin_strict
+from auth import require_admin, require_admin_strict, require_auth
 from config import ALLOWED_CONFIGS, IDENTIFIER_REGEX
 from services.resources import get_system_resources
 from services.system import (
@@ -21,7 +21,7 @@ system_bp = Blueprint("system", __name__)
 
 
 @system_bp.route("/api/config/<filename>", methods=["GET"])
-@require_admin
+@require_auth
 def get_config_handler(filename):
     if filename not in ALLOWED_CONFIGS:
         return jsonify({"error": "not allowed"}), 403
@@ -60,7 +60,7 @@ def service_action_handler(action):
 
 
 @system_bp.route("/api/service/status-detailed", methods=["GET"])
-@require_admin
+@require_auth
 def service_status_detailed_handler():
     return jsonify(detailed_service_status())
 
@@ -77,7 +77,7 @@ def driver_action_handler(ups_name, action):
 
 
 @system_bp.route("/api/system/resources", methods=["GET"])
-@require_admin
+@require_auth
 def system_resources_handler():
     return jsonify(get_system_resources())
 

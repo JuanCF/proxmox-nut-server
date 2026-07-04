@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { API, NOTIFICATION_EVENTS } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import { tryAlert } from '../utils/alerts';
 import HookEditor from './HookEditor';
 
@@ -14,6 +15,7 @@ export default function HooksSection() {
   const [hookEvents, setHookEvents] = useState<string[]>([]);
   const { dangerConfirm, alert } = useConfirm();
   const { openModal, closeThen } = useModal();
+  const { isAdmin } = useAuth();
 
   const loadHooks = useCallback(async () => {
     try {
@@ -62,14 +64,14 @@ export default function HooksSection() {
                     }
                   </td>
                   <td>
-                    {hasHook ? (
+                    {isAdmin && (hasHook ? (
                       <>
                         <button className="secondary" onClick={() => openEditor(evt)}>Edit</button>
                         <button className="secondary danger" onClick={() => void deleteHook(evt)}>Delete</button>
                       </>
                     ) : (
                       <button className="secondary" onClick={() => openEditor(evt)}>Add Hook</button>
-                    )}
+                    ))}
                   </td>
                 </tr>
               );

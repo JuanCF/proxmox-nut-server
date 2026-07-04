@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { API, NOTIFICATION_EVENTS } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import { tryAlert } from '../utils/alerts';
 import type { WolTargetsMap, WolTargetWithName, WolMapping, UpsDevice } from '../types';
 
@@ -219,6 +220,7 @@ export default function WakeOnLan() {
   const [upsList, setUpsList] = useState<string[]>([]);
   const { confirm, dangerConfirm, alert } = useConfirm();
   const { openModal, closeThen } = useModal();
+  const { isAdmin } = useAuth();
 
   const loadTargets = useCallback(async () => {
     try {
@@ -312,31 +314,33 @@ export default function WakeOnLan() {
       <section>
         <h3>Targets</h3>
         <div className="toolbar">
-          <button className="primary" onClick={handleAddTarget}>Add Target</button>
-          <button className="secondary" onClick={() => void handleWakeAll()} disabled={targetNames.length === 0}>Wake All</button>
+          {isAdmin && <button className="primary" onClick={handleAddTarget}>Add Target</button>}
+          {isAdmin && <button className="secondary" onClick={() => void handleWakeAll()} disabled={targetNames.length === 0}>Wake All</button>}
           <button className="secondary" onClick={() => { void loadTargets(); void loadMappings(); }}>Refresh</button>
         </div>
         <div id="wol-targets-table-wrap">
           <table>
             <thead>
-              <tr><th>Name</th><th>MAC</th><th>Broadcast</th><th>Description</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>MAC</th><th>Broadcast</th><th>Description</th>{isAdmin && <th>Actions</th>}</tr>
             </thead>
             <tbody>
               {targetNames.length === 0
-                ? <tr><td colSpan={5} className="empty">No WOL targets configured.</td></tr>
+                ? <tr><td colSpan={isAdmin ? 5 : 4} className="empty">No WOL targets configured.</td></tr>
                 : targetNames.map(name => (
                     <tr key={name}>
                       <td>{name}</td>
                       <td><code>{targets[name].mac}</code></td>
                       <td>{targets[name].broadcast ?? '255.255.255.255'}</td>
                       <td>{targets[name].description ?? '-'}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '0.4rem' }}>
-                          <button className="secondary" onClick={() => void handleWake(name)}>Wake Now</button>
-                          <button className="secondary" onClick={() => handleEditTarget({ name, ...targets[name] })}>Edit</button>
-                          <button className="secondary danger" onClick={() => void handleDeleteTarget(name)}>Delete</button>
-                        </div>
-                      </td>
+                      {isAdmin && (
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button className="secondary" onClick={() => void handleWake(name)}>Wake Now</button>
+                            <button className="secondary" onClick={() => handleEditTarget({ name, ...targets[name] })}>Edit</button>
+                            <button className="secondary danger" onClick={() => void handleDeleteTarget(name)}>Delete</button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))
               }
@@ -348,7 +352,7 @@ export default function WakeOnLan() {
       <section style={{ marginTop: '2rem' }}>
         <h3>Event Mappings</h3>
         <div className="toolbar">
-          <button className="primary" onClick={handleAddMapping}>Add Mapping</button>
+          {isAdmin && <button className="primary" onClick={handleAddMapping}>Add Mapping</button>}
           <button className="secondary" onClick={() => void loadMappings()}>Refresh</button>
         </div>
         <div className="info-box" style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>
@@ -357,20 +361,22 @@ export default function WakeOnLan() {
         <div id="wol-mappings-table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>UPS</th><th>Event</th><th>Targets</th><th>Actions</th></tr>
+              <tr><th>#</th><th>UPS</th><th>Event</th><th>Targets</th>{isAdmin && <th>Actions</th>}</tr>
             </thead>
             <tbody>
               {mappings.length === 0
-                ? <tr><td colSpan={5} className="empty">No event mappings configured.</td></tr>
+                ? <tr><td colSpan={isAdmin ? 5 : 4} className="empty">No event mappings configured.</td></tr>
                 : mappings.map((m, i) => (
                     <tr key={i}>
                       <td>{i + 1}</td>
                       <td>{m.ups}</td>
                       <td><span className={`badge ${EVENT_BADGE[m.event] ?? 'neutral'}`}>{m.event}</span></td>
                       <td>{m.targets.join(', ')}</td>
-                      <td>
-                        <button className="secondary danger" onClick={() => void handleDeleteMapping(i)}>Delete</button>
-                      </td>
+                      {isAdmin && (
+                        <td>
+                          <button className="secondary danger" onClick={() => void handleDeleteMapping(i)}>Delete</button>
+                        </td>
+                      )}
                     </tr>
                   ))
               }

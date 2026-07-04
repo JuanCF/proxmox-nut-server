@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { API } from '../constants';
-import { useConfirm } from './ConfirmDialog';
-import { useModal } from './Modal';
+import { useConfirm } from './useConfirm';
+import { useModal } from './useModal';
+import { useAuth } from '../useAuth';
 import { tryAlert } from '../utils/alerts';
 import UserModal from './UserModal';
 import type { NutUser } from '../types';
@@ -11,6 +12,7 @@ export default function Users() {
   const [userList, setUserList] = useState<NutUser[]>([]);
   const { dangerConfirm, alert } = useConfirm();
   const { openModal, closeThen } = useModal();
+  const { isAdmin } = useAuth();
   const deletePending = useRef<Record<string, boolean>>({});
 
   const loadUsers = useCallback(async () => {
@@ -49,15 +51,20 @@ export default function Users() {
 
   return (
     <>
-      <h2>Users</h2>
+      <h2>NUT Users</h2>
+      <div className="info-box" style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>
+        <p>These are <code>upsd</code> authentication users (<code>upsd.users</code>), used internally by NUT
+        so tools like <code>upsmon</code> can connect to the UPS daemon. They&apos;re unrelated to your
+        dashboard login — for that, see <strong>Accounts</strong> and <strong>API Keys</strong>.</p>
+      </div>
       <div className="toolbar">
-        <button className="primary" onClick={handleAdd}>Add User</button>
+        {isAdmin && <button className="primary" onClick={handleAdd}>Add User</button>}
         <button className="secondary" onClick={() => void loadUsers()}>Refresh</button>
       </div>
       <div id="users-table-wrap">
         <table>
           <thead>
-            <tr><th>Username</th><th>Role</th><th>Password</th><th>Actions</th><th>Instcmds</th><th></th></tr>
+            <tr><th>Username</th><th>Role</th><th>Password</th><th>Actions</th><th>Instcmds</th>{isAdmin && <th></th>}</tr>
           </thead>
           <tbody id="users-body">
             {userList.length === 0
@@ -69,10 +76,12 @@ export default function Users() {
                     <td>{u.password}</td>
                     <td>{u.actions ?? '-'}</td>
                     <td>{u.instcmds ?? '-'}</td>
-                    <td>
-                      <button className="secondary" onClick={() => handleEdit(u)}>Edit</button>
-                      <button className="secondary danger" onClick={() => void handleDelete(u.name)}>Delete</button>
-                    </td>
+                    {isAdmin && (
+                      <td>
+                        <button className="secondary" onClick={() => handleEdit(u)}>Edit</button>
+                        <button className="secondary danger" onClick={() => void handleDelete(u.name)}>Delete</button>
+                      </td>
+                    )}
                   </tr>
                 ))
             }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import UpsDevices from './components/UpsDevices';
@@ -11,18 +11,26 @@ import HooksSection from './components/HooksSection';
 import UpsDetail from './components/UpsDetail';
 import ErrorBoundary from './components/ErrorBoundary';
 import WakeOnLan from './components/WakeOnLan';
+import ApiKeys from './components/ApiKeys';
+import Accounts from './components/Accounts';
+import Setup from './components/Setup';
+import Login from './components/Login';
 import { ThemeProvider } from './theme';
 import { ModalProvider } from './components/Modal';
 import { ConfirmProvider } from './components/ConfirmDialog';
+import { AuthProvider } from './AuthProvider';
+import { useAuth } from './useAuth';
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/ups': 'UPS Devices',
-  '/users': 'Users',
+  '/users': 'NUT Users',
   '/notifications': 'Notifications',
   '/logs': 'Logs',
   '/config': 'Config Files',
   '/wol': 'Wake on LAN',
+  '/apikeys': 'API Keys',
+  '/accounts': 'Accounts',
 };
 
 function getTitle(pathname: string): string {
@@ -36,6 +44,7 @@ function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const title = getTitle(location.pathname);
+  const { isAdmin, account } = useAuth();
 
   return (
     <ConfirmProvider>
@@ -71,6 +80,9 @@ function AppLayout() {
                   <Route path="/logs" element={<Logs />} />
                   <Route path="/config" element={<ConfigFiles />} />
                   <Route path="/wol" element={<WakeOnLan />} />
+                  {account && <Route path="/apikeys" element={<ApiKeys />} />}
+                  {isAdmin && <Route path="/accounts" element={<Accounts />} />}
+                  <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </ErrorBoundary>
             </div>
@@ -81,12 +93,23 @@ function AppLayout() {
   );
 }
 
+function AuthGate() {
+  const { loading, bootstrapped, skipped, account } = useAuth();
+
+  if (loading) return <div className="app-loading">Loading…</div>;
+  if (!bootstrapped && !skipped) return <Setup />;
+  if (bootstrapped && !account) return <Login />;
+  return <AppLayout />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
-      <HashRouter>
-        <AppLayout />
-      </HashRouter>
+      <AuthProvider>
+        <HashRouter>
+          <AuthGate />
+        </HashRouter>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

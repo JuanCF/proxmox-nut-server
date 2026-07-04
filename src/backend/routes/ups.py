@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin
+from auth import require_admin, require_auth
 from config import IDENTIFIER_REGEX
 from services.system import restart_server, restart_monitor, driver_action
 from services.ups import list_ups, get_ups, add_ups, edit_ups, delete_ups, scan_ups, get_ups_detail
@@ -9,7 +9,7 @@ ups_bp = Blueprint("ups", __name__)
 
 
 @ups_bp.route("/api/ups", methods=["GET"])
-@require_admin
+@require_auth
 def list_ups_handler():
     entries = list_ups()
     return jsonify(entries)
@@ -38,7 +38,7 @@ def add_ups_handler():
 
 
 @ups_bp.route("/api/ups/<name>", methods=["GET"])
-@require_admin
+@require_auth
 def get_ups_handler(name):
     if not IDENTIFIER_REGEX.match(name):
         return jsonify({"error": "name contains invalid characters"}), 400
@@ -49,7 +49,7 @@ def get_ups_handler(name):
 
 
 @ups_bp.route("/api/ups/<name>/detail", methods=["GET"])
-@require_admin
+@require_auth
 def get_ups_detail_handler(name):
     if not IDENTIFIER_REGEX.match(name):
         return jsonify({"error": "name contains invalid characters"}), 400

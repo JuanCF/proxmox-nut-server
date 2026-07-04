@@ -2,7 +2,7 @@ import time
 
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin
+from auth import require_auth
 from config import IDENTIFIER_REGEX
 from services.history import get_history, get_available_variables
 
@@ -17,7 +17,7 @@ RANGE_MAP = {
 
 
 @history_bp.route("/api/history/<ups>", methods=["GET"])
-@require_admin
+@require_auth
 def history_query(ups):
     if not IDENTIFIER_REGEX.match(ups):
         return jsonify({"error": "invalid UPS name"}), 400
@@ -36,7 +36,7 @@ def history_query(ups):
 
 
 @history_bp.route("/api/history/<ups>/variables", methods=["GET"])
-@require_admin
+@require_auth
 def history_variables(ups):
     if not IDENTIFIER_REGEX.match(ups):
         return jsonify({"error": "invalid UPS name"}), 400

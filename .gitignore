@@ -1,6 +1,7 @@
 __pycache__/
 nutwatch.tar.gz
 opencode.json
+.playwright-cli/
 
 # Frontend dependencies
 src/frontend/node_modules/

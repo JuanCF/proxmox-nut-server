@@ -58,6 +58,15 @@ export const API = {
     return p;
   },
   historyVariables: (ups: string) => `/history/${encodeURIComponent(ups)}/variables`,
+  AUTH_STATUS: '/auth/status',
+  AUTH_SETUP: '/auth/setup',
+  AUTH_LOGIN: '/auth/login',
+  AUTH_LOGOUT: '/auth/logout',
+  AUTH_ME: '/auth/me',
+  ACCOUNTS: '/accounts',
+  account: (id: number) => `/accounts/${id}`,
+  API_KEYS: '/apikeys',
+  apiKey: (id: number) => `/apikeys/${id}`,
 };
 
 export const DEFAULTS = {

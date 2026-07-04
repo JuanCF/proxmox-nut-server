@@ -99,3 +99,28 @@ export interface CommandResult {
 }
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'auto';
+
+export type AccountRole = 'admin' | 'viewer';
+
+export interface Account {
+  id: number;
+  username: string;
+  role: AccountRole;
+  is_active: boolean;
+  created_at: number;
+  last_login_at: number | null;
+}
+
+export interface ApiKey {
+  id: number;
+  account_id: number;
+  label: string | null;
+  key_prefix: string;
+  created_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  key: string;
+}

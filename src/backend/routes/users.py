@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin
+from auth import require_admin, require_auth
 from config import IDENTIFIER_REGEX
 from services.system import restart_server
 from services.users import list_users, add_user, edit_user, delete_user
@@ -9,7 +9,7 @@ users_bp = Blueprint("users", __name__)
 
 
 @users_bp.route("/api/users", methods=["GET"])
-@require_admin
+@require_auth
 def list_users_handler():
     return jsonify(list_users())
 
