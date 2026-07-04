@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from flask import Blueprint, jsonify, request, session
 
-from auth import require_admin, require_auth, resolve_principal
+from auth import require_admin, require_admin_strict, require_auth, resolve_principal
 from services import auth_db
 
 auth_bp = Blueprint("auth", __name__)
@@ -35,8 +35,6 @@ def auth_status():
 
 @auth_bp.route("/api/auth/setup", methods=["POST"])
 def auth_setup():
-    if auth_db.count_accounts() > 0:
-        return jsonify({"error": "setup already completed"}), 403
     data = request.get_json(force=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
@@ -44,7 +42,10 @@ def auth_setup():
         return jsonify({"error": "username and password are required"}), 400
     if len(password) < 8:
         return jsonify({"error": "password must be at least 8 characters"}), 400
-    account, err = auth_db.create_account(username, password, role="admin")
+    # Atomic check-and-insert so concurrent setups can't create two admins.
+    account, err = auth_db.create_initial_admin(username, password)
+    if err == "setup already completed":
+        return jsonify({"error": err}), 403
     if err:
         return jsonify({"error": err}), 409
     session.clear()
@@ -92,7 +93,7 @@ def list_accounts_handler():
 
 
 @auth_bp.route("/api/accounts", methods=["POST"])
-@require_admin
+@require_admin_strict
 def create_account_handler():
     data = request.get_json(force=True) or {}
     username = (data.get("username") or "").strip()
@@ -112,12 +113,15 @@ def create_account_handler():
 @require_admin
 def update_account_handler(account_id):
     data = request.get_json(force=True) or {}
-    account = auth_db.update_account(
-        account_id,
-        role=data.get("role"),
-        is_active=data.get("is_active"),
-        password=data.get("password") or None,
-    )
+    try:
+        account = auth_db.update_account(
+            account_id,
+            role=data.get("role"),
+            is_active=data.get("is_active"),
+            password=data.get("password") or None,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
     if account is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(account)
@@ -126,7 +130,10 @@ def update_account_handler(account_id):
 @auth_bp.route("/api/accounts/<int:account_id>", methods=["DELETE"])
 @require_admin
 def deactivate_account_handler(account_id):
-    account = auth_db.update_account(account_id, is_active=False)
+    try:
+        account = auth_db.update_account(account_id, is_active=False)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
     if account is None:
         return jsonify({"error": "not found"}), 404
     return jsonify(account)

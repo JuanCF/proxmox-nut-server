@@ -81,6 +81,7 @@ Constants and configuration from environment variables:
 - `NUTWATCH_HOST`, `NUTWATCH_PORT`
 
 ### `auth.py`
+
 The `require_admin` and `require_admin_strict` decorators. `require_admin` checks whether a principal is resolved (session cookie or per-user API key); if no accounts exist yet, auth is disabled. `require_admin_strict` returns 403 until an admin account is configured — used for destructive endpoints (reboot, shutdown). Both validate a `Bearer` token from the `Authorization` header as one of the resolution paths.
 
 > Note: this section predates the accounts/API-keys system in `docs/auth-plan.md`; see that doc and `services/auth_db.py` for the current design.

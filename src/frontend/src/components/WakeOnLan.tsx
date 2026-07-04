@@ -325,7 +325,7 @@ export default function WakeOnLan() {
             </thead>
             <tbody>
               {targetNames.length === 0
-                ? <tr><td colSpan={5} className="empty">No WOL targets configured.</td></tr>
+                ? <tr><td colSpan={isAdmin ? 5 : 4} className="empty">No WOL targets configured.</td></tr>
                 : targetNames.map(name => (
                     <tr key={name}>
                       <td>{name}</td>
@@ -365,7 +365,7 @@ export default function WakeOnLan() {
             </thead>
             <tbody>
               {mappings.length === 0
-                ? <tr><td colSpan={5} className="empty">No event mappings configured.</td></tr>
+                ? <tr><td colSpan={isAdmin ? 5 : 4} className="empty">No event mappings configured.</td></tr>
                 : mappings.map((m, i) => (
                     <tr key={i}>
                       <td>{i + 1}</td>

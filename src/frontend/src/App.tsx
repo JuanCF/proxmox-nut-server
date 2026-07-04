@@ -43,7 +43,7 @@ function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const title = getTitle(location.pathname);
-  const { isAdmin } = useAuth();
+  const { isAdmin, account } = useAuth();
 
   return (
     <ConfirmProvider>
@@ -79,7 +79,7 @@ function AppLayout() {
                   <Route path="/logs" element={<Logs />} />
                   <Route path="/config" element={<ConfigFiles />} />
                   <Route path="/wol" element={<WakeOnLan />} />
-                  <Route path="/apikeys" element={<ApiKeys />} />
+                  {account && <Route path="/apikeys" element={<ApiKeys />} />}
                   {isAdmin && <Route path="/accounts" element={<Accounts />} />}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

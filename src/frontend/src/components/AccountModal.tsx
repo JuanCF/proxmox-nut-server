@@ -4,6 +4,7 @@ import { API } from '../constants';
 import { useConfirm } from './ConfirmDialog';
 import { useModal } from './Modal';
 import { tryAlert } from '../utils/alerts';
+import { useAuth } from '../AuthProvider';
 import type { Account, AccountRole } from '../types';
 
 interface AccountModalProps {
@@ -19,8 +20,12 @@ export default function AccountModal({ mode, account, onSaved }: AccountModalPro
   const savePending = useRef(false);
   const { alert } = useConfirm();
   const { closeModal } = useModal();
+  const { account: currentAccount } = useAuth();
 
   const isEdit = mode === 'edit';
+  // Editing your own account can't change your role: a self-demotion to viewer
+  // would strip your admin access mid-session and can lock you out.
+  const isSelfEdit = isEdit && account?.id === currentAccount?.id;
 
   async function handleSave() {
     if (savePending.current) return;
@@ -75,10 +80,11 @@ export default function AccountModal({ mode, account, onSaved }: AccountModalPro
       </div>
       <div className="field">
         <label>Role</label>
-        <select value={role} onChange={e => setRole(e.target.value as AccountRole)}>
+        <select value={role} onChange={e => setRole(e.target.value as AccountRole)} disabled={isSelfEdit}>
           <option value="viewer">Viewer</option>
           <option value="admin">Admin</option>
         </select>
+        {isSelfEdit && <p style={{ fontSize: '0.8rem', opacity: 0.7, marginTop: '0.25rem' }}>You can&apos;t change your own role.</p>}
       </div>
       <div className="modal-actions">
         <button className="secondary" onClick={closeModal}>Cancel</button>

@@ -184,6 +184,9 @@ def test_revoked_key_rejected():
 
 def test_inactive_account_key_rejected():
     admin = _make_admin()
+    # A second admin keeps an active admin around so the first can be
+    # deactivated (the last active admin can't be deactivated).
+    auth_db.create_account("admin2", "adminpass123", role="admin")
     raw_key, _ = auth_db.create_api_key(admin["id"])
     auth_db.update_account(admin["id"], is_active=False)
     app = _make_app()

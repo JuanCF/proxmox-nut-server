@@ -68,6 +68,33 @@ def test_update_account_role_and_password():
     assert auth_db.verify_login("bob", "pw12345") is None
 
 
+def test_cannot_deactivate_last_active_admin():
+    admin, _ = auth_db.create_account("admin", "pw123456", role="admin")
+    with pytest.raises(ValueError):
+        auth_db.update_account(admin["id"], is_active=False)
+    with pytest.raises(ValueError):
+        auth_db.update_account(admin["id"], role="viewer")
+    # Password-only change on the last admin is still allowed.
+    assert auth_db.update_account(admin["id"], password="newpass123") is not None
+
+
+def test_can_deactivate_admin_when_another_exists():
+    a1, _ = auth_db.create_account("admin", "pw123456", role="admin")
+    auth_db.create_account("admin2", "pw123456", role="admin")
+    updated = auth_db.update_account(a1["id"], is_active=False)
+    assert updated["is_active"] is False
+
+
+def test_create_initial_admin_atomic():
+    account, err = auth_db.create_initial_admin("admin", "pw123456")
+    assert err is None
+    assert account["role"] == "admin"
+    # A second attempt is rejected once an account exists.
+    account2, err2 = auth_db.create_initial_admin("admin2", "pw123456")
+    assert account2 is None
+    assert err2 == "setup already completed"
+
+
 def test_list_accounts():
     auth_db.create_account("zed", "pw12345", role="viewer")
     auth_db.create_account("amy", "pw12345", role="admin")

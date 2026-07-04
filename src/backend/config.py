@@ -17,6 +17,14 @@ except ValueError:
 # default; auto-generated and persisted in the auth DB on first run if unset,
 # so sessions survive restarts without requiring operator setup.
 NUTWATCH_SECRET_KEY = os.environ.get("NUTWATCH_SECRET_KEY", "")
+# A weak override would undermine Flask session-cookie signing. When empty we
+# fall back to a strong auto-generated key (see services/auth_db.py); when set,
+# fail fast unless it carries enough entropy.
+if NUTWATCH_SECRET_KEY and len(NUTWATCH_SECRET_KEY) < 32:
+    raise RuntimeError(
+        "NUTWATCH_SECRET_KEY must be at least 32 characters; "
+        "unset it to use the auto-generated key instead."
+    )
 
 # Secure defaults to false because NutWatch is typically served over plain
 # HTTP on the LAN; browsers silently drop Secure cookies over non-HTTPS

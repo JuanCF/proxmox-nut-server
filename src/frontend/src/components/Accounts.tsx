@@ -80,7 +80,7 @@ export default function Accounts() {
                   <td>{formatDate(a.last_login_at)}</td>
                   <td>
                     <button className="secondary" onClick={() => handleEdit(a)}>Edit</button>
-                    {a.is_active && (
+                    {a.is_active && a.id !== currentAccount?.id && (
                       <button className="secondary danger" onClick={() => void handleDeactivate(a)}>Deactivate</button>
                     )}
                   </td>

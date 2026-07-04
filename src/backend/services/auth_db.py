@@ -58,7 +58,13 @@ def _ensure_schema(conn):
 def get_db():
     db_dir = os.path.dirname(AUTH_DB)
     if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
+        os.makedirs(db_dir, mode=0o700, exist_ok=True)
+    # The auth DB holds password hashes, API-key hashes and the session signing
+    # key — pre-create it 0600 so it never inherits a world-readable umask.
+    if not os.path.exists(AUTH_DB):
+        os.close(os.open(AUTH_DB, os.O_CREAT | os.O_RDWR, 0o600))
+    else:
+        os.chmod(AUTH_DB, 0o600)
     conn = sqlite3.connect(AUTH_DB)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
@@ -73,12 +79,15 @@ def get_or_create_secret_key() -> str:
         row = conn.execute("SELECT value FROM meta WHERE key = 'secret_key'").fetchone()
         if row:
             return row["value"]
-        value = secrets.token_hex(32)
+        # INSERT OR IGNORE + re-read so concurrent startups converge on one key
+        # instead of racing into an IntegrityError on the PRIMARY KEY.
         conn.execute(
-            "INSERT INTO meta (key, value) VALUES ('secret_key', ?)", [value]
+            "INSERT OR IGNORE INTO meta (key, value) VALUES ('secret_key', ?)",
+            [secrets.token_hex(32)],
         )
         conn.commit()
-        return value
+        row = conn.execute("SELECT value FROM meta WHERE key = 'secret_key'").fetchone()
+        return row["value"]
     finally:
         conn.close()
 
@@ -98,6 +107,17 @@ def count_accounts() -> int:
     conn = get_db()
     try:
         row = conn.execute("SELECT COUNT(*) AS n FROM accounts").fetchone()
+        return row["n"]
+    finally:
+        conn.close()
+
+
+def count_active_admins() -> int:
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin' AND is_active = 1"
+        ).fetchone()
         return row["n"]
     finally:
         conn.close()
@@ -124,6 +144,36 @@ def create_account(username: str, password: str, role: str = "viewer") -> tuple:
             "SELECT * FROM accounts WHERE id = ?", [cursor.lastrowid]
         ).fetchone()
         return _row_to_account(row), None
+    finally:
+        conn.close()
+
+
+def create_initial_admin(username: str, password: str) -> tuple:
+    """Atomically create the first admin account.
+
+    The existence check and insert run inside one write transaction so two
+    concurrent /api/auth/setup requests can't both see zero accounts and each
+    create an admin. Returns ``(None, "setup already completed")`` once any
+    account exists, preserving the bootstrap rule.
+    """
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT COUNT(*) AS n FROM accounts").fetchone()
+        if row["n"] > 0:
+            conn.rollback()
+            return None, "setup already completed"
+        password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+        cursor = conn.execute(
+            "INSERT INTO accounts (username, password_hash, role, is_active, created_at) "
+            "VALUES (?, ?, 'admin', 1, ?)",
+            [username, password_hash, time.time()],
+        )
+        conn.commit()
+        account = conn.execute(
+            "SELECT * FROM accounts WHERE id = ?", [cursor.lastrowid]
+        ).fetchone()
+        return _row_to_account(account), None
     finally:
         conn.close()
 
@@ -186,6 +236,13 @@ def update_account(account_id: int, role: str | None = None, is_active: bool | N
         row = conn.execute("SELECT * FROM accounts WHERE id = ?", [account_id]).fetchone()
         if not row:
             return None
+        # Guard the bootstrap invariant: never let the last active admin be
+        # demoted or deactivated, which would lock everyone out of admin access.
+        demoting = role is not None and role != "admin"
+        deactivating = is_active is False
+        if (demoting or deactivating) and row["role"] == "admin" and row["is_active"]:
+            if count_active_admins() <= 1:
+                raise ValueError("cannot demote or deactivate the last active admin")
         if role is not None:
             conn.execute("UPDATE accounts SET role = ? WHERE id = ?", [role, account_id])
         if is_active is not None:

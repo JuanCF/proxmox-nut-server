@@ -46,16 +46,16 @@ export default function Setup() {
         <p>Create the first admin account to enable login. You can skip this and keep NutWatch open, exactly as it works today.</p>
         <form onSubmit={e => void handleSubmit(e)}>
           <div className="field">
-            <label>Username</label>
-            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoFocus />
+            <label htmlFor="setup-username">Username</label>
+            <input id="setup-username" value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoComplete="username" autoFocus />
           </div>
           <div className="field">
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" />
+            <label htmlFor="setup-password">Password</label>
+            <input id="setup-password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
           </div>
           <div className="field">
-            <label>Confirm Password</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Confirm password" />
+            <label htmlFor="setup-confirm-password">Confirm Password</label>
+            <input id="setup-confirm-password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Confirm password" autoComplete="new-password" />
           </div>
           {error && <p className="auth-error">{error}</p>}
           <div className="modal-actions">

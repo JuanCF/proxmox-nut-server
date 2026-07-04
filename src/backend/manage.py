@@ -54,7 +54,7 @@ def cmd_reset_password(args):
     return 0
 
 
-def cmd_list_accounts(args):
+def cmd_list_accounts(_args):
     accounts = auth_db.list_accounts()
     if not accounts:
         print("No accounts configured. The app is running fully open (no auth).")
@@ -76,18 +76,24 @@ def main():
 
     p_create = sub.add_parser("create-admin", help="Create a new admin account, or promote+reset an existing one")
     p_create.add_argument("username")
-    p_create.add_argument("--password", help="Password (omit to be prompted)")
+    p_create.add_argument("--password-stdin", action="store_true",
+                          help="Read the password from stdin (for automation); otherwise prompt interactively")
     p_create.set_defaults(func=cmd_create_admin)
 
     p_reset = sub.add_parser("reset-password", help="Reset an existing account's password")
     p_reset.add_argument("username")
-    p_reset.add_argument("--password", help="New password (omit to be prompted)")
+    p_reset.add_argument("--password-stdin", action="store_true",
+                         help="Read the new password from stdin (for automation); otherwise prompt interactively")
     p_reset.set_defaults(func=cmd_reset_password)
 
     p_list = sub.add_parser("list-accounts", help="List accounts, roles, and active status")
     p_list.set_defaults(func=cmd_list_accounts)
 
     args = parser.parse_args()
+    # Passwords are never accepted on the command line (visible in `ps`); read
+    # from stdin when automating, else fall back to an interactive prompt.
+    if hasattr(args, "password_stdin"):
+        args.password = sys.stdin.readline().rstrip("\n") if args.password_stdin else None
     sys.exit(args.func(args))
 
 

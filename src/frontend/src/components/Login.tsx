@@ -35,12 +35,12 @@ export default function Login() {
         <h3>Sign in to NutWatch</h3>
         <form onSubmit={e => void handleSubmit(e)}>
           <div className="field">
-            <label>Username</label>
-            <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoFocus />
+            <label htmlFor="login-username">Username</label>
+            <input id="login-username" value={username} onChange={e => setUsername(e.target.value)} placeholder="Username" autoComplete="username" autoFocus />
           </div>
           <div className="field">
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" />
+            <label htmlFor="login-password">Password</label>
+            <input id="login-password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password" />
           </div>
           {error && <p className="auth-error">{error}</p>}
           <div className="modal-actions">

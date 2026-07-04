@@ -23,7 +23,8 @@ def resolve_principal() -> dict | None:
         account = get_account_by_id(account_id)
         if account and account["is_active"]:
             return account
-        return None
+        # Stale session (account deleted/deactivated) — don't block a valid
+        # Bearer key; fall through to Authorization-header resolution.
 
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
