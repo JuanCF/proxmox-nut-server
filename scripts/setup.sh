@@ -13,7 +13,10 @@
 # Shared environment variables:
 #   NUTWATCH_REF        — NutWatch release tag (default: v1.1.2)
 #   NUTWATCH_URL_PREFIX — override tarball URL for local testing
-#   NUTWATCH_API_KEY    — Bearer token for NutWatch API auth (default: empty = no auth)
+#
+# NutWatch is fully open (no login) until an admin account is created, either
+# from the dashboard's first-run Setup page or via:
+#   /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py create-admin <username>
 #
 # Fresh install environment variables:
 #   AUTO                — set to 1 for non-interactive mode
@@ -376,12 +379,6 @@ update_nutwatch() {
     chown root:nut /etc/nut/notifycmd.sh
   fi
 
-  if [[ -n "${NUTWATCH_API_KEY:-}" ]]; then
-    mkdir -p /etc/nutwatch
-    echo "NUTWATCH_API_KEY=${NUTWATCH_API_KEY}" >/etc/nutwatch/env
-    chmod 600 /etc/nutwatch/env
-  fi
-
   systemctl daemon-reload
   systemctl enable nutwatch 2>/dev/null || true
 
@@ -444,12 +441,6 @@ install_nutwatch() {
   if [[ -f "$NUTWATCH_DIR/scripts/nutwatch-wol-dispatch" ]]; then
     cp "$NUTWATCH_DIR/scripts/nutwatch-wol-dispatch" /usr/local/bin/nutwatch-wol-dispatch
     chmod 755 /usr/local/bin/nutwatch-wol-dispatch
-  fi
-
-  if [[ -n "${NUTWATCH_API_KEY:-}" ]]; then
-    mkdir -p /etc/nutwatch
-    echo "NUTWATCH_API_KEY=${NUTWATCH_API_KEY}" >/etc/nutwatch/env
-    chmod 600 /etc/nutwatch/env
   fi
 
   cp "$NUTWATCH_DIR/nutwatch.service" /etc/systemd/system/
@@ -713,7 +704,9 @@ main() {
     echo "Environment variables:"
     echo "  AUTO=1          — non-interactive mode (fresh install only)"
     echo "  NUTWATCH_REF    — release tag (default: v1.1.2)"
-    echo "  NUTWATCH_API_KEY — Bearer token for NutWatch API auth"
+    echo ""
+    echo "NutWatch is open (no login) until an admin account is created via the"
+    echo "dashboard's Setup page or 'manage.py create-admin' in the install dir."
     echo ""
     echo "See file header for full list of env vars."
     ;;

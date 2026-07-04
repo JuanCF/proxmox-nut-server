@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin
+from auth import require_admin, require_auth
 from config import IDENTIFIER_REGEX
 from services import wol as wol_service
 
@@ -8,7 +8,7 @@ wol_bp = Blueprint("wol", __name__)
 
 
 @wol_bp.route("/api/wol/targets", methods=["GET"])
-@require_admin
+@require_auth
 def list_targets():
     targets = wol_service.list_targets()
     return jsonify({"targets": targets})
@@ -92,7 +92,7 @@ def wake_all():
 
 
 @wol_bp.route("/api/wol/mappings", methods=["GET"])
-@require_admin
+@require_auth
 def list_mappings():
     mappings = wol_service.list_mappings()
     return jsonify({"mappings": mappings})
@@ -129,6 +129,6 @@ def delete_mapping(index):
 
 
 @wol_bp.route("/api/wol/network-hosts", methods=["GET"])
-@require_admin
+@require_auth
 def list_network_hosts():
     return jsonify({"hosts": wol_service.scan_network_hosts()})

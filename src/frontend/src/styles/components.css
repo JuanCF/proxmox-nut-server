@@ -105,7 +105,6 @@
 }
 
 .sidebar-footer {
-  margin-top: auto;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-subtle);
   display: flex;
@@ -1494,6 +1493,60 @@ textarea#config-editor {
 .error-boundary .card p {
   color: var(--text-secondary);
   margin-bottom: 1.25rem;
+}
+
+/* ─── Auth (Setup / Login) ─── */
+.auth-gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.auth-card {
+  max-width: 420px;
+  width: 100%;
+}
+
+.auth-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.auth-card p {
+  color: var(--text-secondary);
+  margin-bottom: 1.25rem;
+}
+
+.auth-error {
+  color: var(--red);
+  margin-bottom: 1rem;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+}
+
+.auth-user-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.auth-user-chip span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-user-chip .badge {
+  text-transform: capitalize;
 }
 
 /* ─── UPS Detail Live/Pause Toggle ─── */

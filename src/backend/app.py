@@ -18,8 +18,9 @@ except ImportError:  # pragma: no cover
 
     Flask = _FakeFlask
 
-from config import NUTWATCH_HOST, NUTWATCH_PORT
-from routes import ups_bp, users_bp, upsmon_bp, hooks_bp, system_bp, logs_bp, wol_bp, history_bp
+from config import NUTWATCH_HOST, NUTWATCH_PORT, NUTWATCH_SECRET_KEY, NUTWATCH_SESSION_COOKIE_SECURE
+from routes import ups_bp, users_bp, upsmon_bp, hooks_bp, system_bp, logs_bp, wol_bp, history_bp, auth_bp
+from services.auth_db import get_or_create_secret_key
 from services.history import start_collector
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -29,6 +30,11 @@ logger = logging.getLogger("nutwatch")
 def create_app():
     app = Flask(__name__)
 
+    app.secret_key = NUTWATCH_SECRET_KEY or get_or_create_secret_key()
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = NUTWATCH_SESSION_COOKIE_SECURE
+
     app.register_blueprint(ups_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(upsmon_bp)
@@ -37,6 +43,7 @@ def create_app():
     app.register_blueprint(logs_bp)
     app.register_blueprint(wol_bp)
     app.register_blueprint(history_bp)
+    app.register_blueprint(auth_bp)
 
     try:
         interval = int(os.environ.get("NUTWATCH_HISTORY_INTERVAL", "60"))

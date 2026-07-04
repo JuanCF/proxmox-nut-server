@@ -11,6 +11,7 @@ function renderCard(props: {
   onEdit?: () => void;
   onDriverAction?: () => void;
   onDelete?: () => void;
+  isAdmin?: boolean;
 } = {}) {
   return render(
     <MemoryRouter>
@@ -19,6 +20,7 @@ function renderCard(props: {
         onEdit={vi.fn()}
         onDriverAction={vi.fn()}
         onDelete={vi.fn()}
+        isAdmin={true}
         {...props}
       />
     </MemoryRouter>
@@ -78,5 +80,14 @@ describe('UpsCard', () => {
   it('renders driver directives', () => {
     renderCard({ ups: { name: 't', driver: 'd', port: 'p', desc: 'x', status: 'online', directives: [['pollfreq', '5'], ['vendorid', '1234']] } });
     expect(screen.getByText(/pollfreq=5, vendorid=1234/)).toBeInTheDocument();
+  });
+
+  it('hides Edit/driver/Delete actions for a non-admin viewer', () => {
+    renderCard({ isAdmin: false });
+    expect(screen.queryByText('Edit')).toBeNull();
+    expect(screen.queryByText('Start driver')).toBeNull();
+    expect(screen.queryByText('Stop driver')).toBeNull();
+    expect(screen.queryByText('Delete')).toBeNull();
+    expect(screen.getByText('Hooks')).toBeInTheDocument();
   });
 });

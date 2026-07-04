@@ -45,14 +45,16 @@ CI runs `shellcheck` + `shfmt -d -i 2` on `vm/*.sh` and Python lint + tests (see
 
 ## NutWatch (src/backend/)
 
-- Modular Flask app: `app.py` (bootstrap), `auth.py` (Bearer auth), `config.py` (constants), `utils.py` (helpers), `parsers/` (config parsers), `services/` (business logic), `routes/` (API blueprints), `static/` (SPA frontend).
-- Web UI tabs: **UPS Devices** (with per-UPS hook editor), **Users**, **Notifications** (`upsmon.conf` editor), **Logs**, **Config Files**, **Wake on LAN**.
-- API endpoints: `/api/ups`, `/api/users`, `/api/upsmon/config`, `/api/hooks/<upsname>/<event>`, `/api/service/...`, `/api/system/...`, `/api/logs/...`, `/api/wol/targets`, `/api/wol/mappings`.
+- Modular Flask app: `app.py` (bootstrap), `auth.py` (principal resolution + role checks), `manage.py` (account CLI), `config.py` (constants), `utils.py` (helpers), `parsers/` (config parsers), `services/` (business logic), `routes/` (API blueprints), `static/` (SPA frontend).
+- Web UI tabs: **Dashboard**, **UPS Devices** (with per-UPS hook editor), **UPS Detail Telemetry**, **Historical Data & Charts**, **NUT Users** (upsd.users — distinct from dashboard Accounts), **Notifications** (`upsmon.conf` editor), **Logs**, **Config Files**, **Wake on LAN**, **API Keys**, **Accounts** (admin only).
+- API endpoints: `/api/ups`, `/api/config/<filename>`, `/api/users`, `/api/upsmon/config`, `/api/hooks/<upsname>/<event>`, `/api/driver/<name>/<action>`, `/api/service/...`, `/api/system/...`, `/api/logs/...`, `/api/history/<ups>...`, `/api/wol/targets`, `/api/wol/mappings`, `/api/auth/...`, `/api/accounts`, `/api/apikeys`.
 - Runs as `nutwatch.service` on port 8081 (configurable via `NUTWATCH_HOST`, `NUTWATCH_PORT` env vars).
-- Auth: Bearer token via `NUTWATCH_API_KEY` env var — if empty, auth is disabled. Destructive system endpoints (reboot, shutdown) use `require_admin_strict` which returns 403 when the API key is unset.
+- Auth: accounts (admin/viewer role) in `services/auth_db.py` (SQLite, `NUTWATCH_AUTH_DB`). `auth.resolve_principal()` checks a Flask session cookie, then an `Authorization: Bearer <key>` API key (a key inherits its owner's role) — see `docs/auth-plan.md` for the full design. Bootstrap rule: **zero accounts → everything open** (mirrors the old open-by-default behavior); once the first admin account exists (via the UI's first-run Setup page, or `manage.py create-admin`), auth is enforced. Destructive system endpoints (reboot, shutdown) use `require_admin_strict`, which 403s until an admin account exists. `manage.py create-admin` / `reset-password` / `list-accounts` is the lockout-recovery escape hatch (shell access always wins).
 - Config writes use atomic `tempfile` + `os.replace`; input validated with `IDENTIFIER_REGEX`.
+- `services/resources.py` uses `psutil` for CPU, memory, and disk monitoring, exposed via `GET /api/system/resources`.
+- Config saves (UPS, users, upsmon.conf) auto-restart affected NUT services, and the frontend shows a restart prompt modal after successful saves.
 - `scripts/setup.sh --install-only` downloads a pre-built tarball from GitHub Releases (pinned by `NUTWATCH_REF` tag). To test a local build, run `make build-tarball`, serve the tarball, and set `NUTWATCH_URL_PREFIX`.
-- Tests live in `tests/` (11 files): parser roundtrips, service-layer CRUD, auth, routes, and utilities. Import from `parsers`, `utils`, `services`, `auth`, or `routes` (not from `app.py`) — tests run from `src/backend/`.
+- Tests live in `tests/` (14 files): parser roundtrips, service-layer CRUD, auth (principal resolution + routes), the `manage.py` CLI, and utilities. Import from `parsers`, `utils`, `services`, `auth`, `routes`, or `manage` (not from `app.py`) — tests run from `src/backend/`.
 
 ## Edge Cases
 
@@ -71,3 +73,5 @@ CI runs `shellcheck` + `shfmt -d -i 2` on `vm/*.sh` and Python lint + tests (see
 - WOL target deletion also cleans up orphaned target references in event mappings: `services/wol.py::delete_target()` removes the target name from all mapping target lists and drops any mappings with empty target lists.
 - `NOTIFYFLAG` must include `EXEC` for `upsmon` to actually invoke `NOTIFYCMD`. The VM template sets `SYSLOG+WALL+EXEC` for all 9 events by default.
 - WOL dispatch double-fires: both standalone install (`scripts/setup.sh`) and VM install (`vm/nut-vm.sh`) set up the same WOL dispatch call in `notifycmd.sh`, so the dispatch runs on both installation paths.
+- Config-save auto-restart: `routes/ups.py`, `routes/users.py`, and `routes/upsmon.py` trigger `restart_all()` (both nut-server and nut-monitor) after PUT/POST/DELETE to ensure NUT picks up changes immediately.
+- Restart prompt modal: the frontend `RestartPromptModal.tsx` component prompts users to restart NUT services after successful config saves; canceling the prompt reverts the UI to avoid stale state.

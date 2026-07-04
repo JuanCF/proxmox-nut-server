@@ -3,6 +3,7 @@ import { api } from '../api';
 import { API } from '../constants';
 import { useConfirm } from './ConfirmDialog';
 import { useModal } from './Modal';
+import { useAuth } from '../AuthProvider';
 import UpsCard from './UpsCard';
 import UpsModal from './UpsModal';
 import ServiceStatus from './ServiceStatus';
@@ -15,6 +16,7 @@ export default function UpsDevices() {
   const [details, setDetails] = useState<DetailMap>({});
   const { confirm, dangerConfirm, alert } = useConfirm();
   const { openModal, closeModal, closeThen } = useModal();
+  const { isAdmin } = useAuth();
   const deletePending = useRef<Record<string, boolean>>({});
   const driverPending = useRef<Record<string, boolean>>({});
 
@@ -156,8 +158,8 @@ export default function UpsDevices() {
       <h2>UPS Devices</h2>
       <ServiceStatus />
       <div className="toolbar">
-        <button className="primary" onClick={handleAdd}>Add UPS</button>
-        <button className="secondary" onClick={() => void handleScan()}>Scan USB</button>
+        {isAdmin && <button className="primary" onClick={handleAdd}>Add UPS</button>}
+        {isAdmin && <button className="secondary" onClick={() => void handleScan()}>Scan USB</button>}
         <button className="secondary" onClick={() => void loadUps()}>Refresh</button>
       </div>
       <div className="card-grid">
@@ -171,6 +173,7 @@ export default function UpsDevices() {
                 onEdit={handleEdit}
                 onDriverAction={(n, a) => void handleDriverAction(n, a)}
                 onDelete={(n) => void handleDelete(n)}
+                isAdmin={isAdmin}
               />
             ))
         }

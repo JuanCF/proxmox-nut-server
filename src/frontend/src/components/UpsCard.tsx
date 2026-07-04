@@ -11,9 +11,10 @@ interface UpsCardProps {
   onEdit: (ups: UpsDevice) => void;
   onDriverAction: (name: string, action: string) => void;
   onDelete: (name: string) => void;
+  isAdmin: boolean;
 }
 
-export default function UpsCard({ ups, detail, onEdit, onDriverAction, onDelete }: UpsCardProps) {
+export default function UpsCard({ ups, detail, onEdit, onDriverAction, onDelete, isAdmin }: UpsCardProps) {
   const navigate = useNavigate();
   const dirs = (ups.directives ?? []).map(d => d[0] + '=' + d[1]).join(', ');
 
@@ -47,11 +48,11 @@ export default function UpsCard({ ups, detail, onEdit, onDriverAction, onDelete 
         {voltage != null && <span className="metric-text">{voltage} V</span>}
       </div>
       <div className="actions">
-        <button className="secondary" onClick={(e) => { e.stopPropagation(); onEdit(ups); }}>Edit</button>
+        {isAdmin && <button className="secondary" onClick={(e) => { e.stopPropagation(); onEdit(ups); }}>Edit</button>}
         <button className="secondary" onClick={(e) => { e.stopPropagation(); navigate('/ups/' + encodeURIComponent(ups.name) + '/hooks'); }}>Hooks</button>
-        <button className="secondary" onClick={(e) => { e.stopPropagation(); onDriverAction(ups.name, 'start'); }}>Start driver</button>
-        <button className="secondary" onClick={(e) => { e.stopPropagation(); onDriverAction(ups.name, 'stop'); }}>Stop driver</button>
-        <button className="secondary danger" onClick={(e) => { e.stopPropagation(); onDelete(ups.name); }}>Delete</button>
+        {isAdmin && <button className="secondary" onClick={(e) => { e.stopPropagation(); onDriverAction(ups.name, 'start'); }}>Start driver</button>}
+        {isAdmin && <button className="secondary" onClick={(e) => { e.stopPropagation(); onDriverAction(ups.name, 'stop'); }}>Stop driver</button>}
+        {isAdmin && <button className="secondary danger" onClick={(e) => { e.stopPropagation(); onDelete(ups.name); }}>Delete</button>}
       </div>
     </div>
   );

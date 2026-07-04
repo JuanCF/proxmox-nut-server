@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from flask import Flask
 
@@ -9,6 +11,7 @@ import routes.ups
 import routes.upsmon
 import routes.users
 import routes.wol
+from services import auth_db
 
 
 def _make_app():
@@ -30,8 +33,23 @@ def _register_all(app):
 
 
 @pytest.fixture(autouse=True)
-def no_auth(monkeypatch):
-    monkeypatch.setattr("auth.NUTWATCH_API_KEY", "")
+def no_auth(tmp_path, monkeypatch):
+    # Fresh, empty auth DB per test -> bootstrap-open mode (mirrors the old
+    # no-auth-configured default of fully open access).
+    monkeypatch.setattr("services.auth_db.AUTH_DB", os.path.join(tmp_path, "test_auth.db"))
+    monkeypatch.setattr("services.auth_db._schema_ready_for", None)
+
+
+def _create_admin_bearer():
+    account, _ = auth_db.create_account("admin", "adminpass123", role="admin")
+    raw_key, _ = auth_db.create_api_key(account["id"])
+    return raw_key
+
+
+def _create_viewer_bearer():
+    account, _ = auth_db.create_account("viewer", "viewerpass123", role="viewer")
+    raw_key, _ = auth_db.create_api_key(account["id"])
+    return raw_key
 
 
 # ── Hooks routes ──────────────────────────────────────────────────────
@@ -221,16 +239,16 @@ def test_system_reboot_route_no_auth():
 
 
 def test_system_reboot_route_with_auth(monkeypatch):
-    monkeypatch.setattr("auth.NUTWATCH_API_KEY", "secret123")
     monkeypatch.setattr("routes.system.reboot_system", lambda: (0, "", ""))
+    raw_key = _create_admin_bearer()
     app = _register_all(_make_app())
     with app.test_client() as c:
-        resp = c.post("/api/system/reboot", headers={"Authorization": "Bearer secret123"})
+        resp = c.post("/api/system/reboot", headers={"Authorization": f"Bearer {raw_key}"})
         assert resp.status_code == 200
 
 
-def test_system_reboot_route_wrong_token(monkeypatch):
-    monkeypatch.setattr("auth.NUTWATCH_API_KEY", "secret123")
+def test_system_reboot_route_wrong_token():
+    _create_admin_bearer()
     app = _register_all(_make_app())
     with app.test_client() as c:
         resp = c.post("/api/system/reboot", headers={"Authorization": "Bearer wrong"})
@@ -245,11 +263,11 @@ def test_system_shutdown_route_no_auth():
 
 
 def test_system_shutdown_route_with_auth(monkeypatch):
-    monkeypatch.setattr("auth.NUTWATCH_API_KEY", "secret123")
     monkeypatch.setattr("routes.system.shutdown_system", lambda: (0, "", ""))
+    raw_key = _create_admin_bearer()
     app = _register_all(_make_app())
     with app.test_client() as c:
-        resp = c.post("/api/system/shutdown", headers={"Authorization": "Bearer secret123"})
+        resp = c.post("/api/system/shutdown", headers={"Authorization": f"Bearer {raw_key}"})
         assert resp.status_code == 200
 
 
@@ -261,11 +279,11 @@ def test_system_restart_nutwatch_route_no_auth():
 
 
 def test_system_restart_nutwatch_route_with_auth(monkeypatch):
-    monkeypatch.setattr("auth.NUTWATCH_API_KEY", "secret123")
     monkeypatch.setattr("routes.system.restart_nutwatch", lambda: (0, "", ""))
+    raw_key = _create_admin_bearer()
     app = _register_all(_make_app())
     with app.test_client() as c:
-        resp = c.post("/api/system/restart-nutwatch", headers={"Authorization": "Bearer secret123"})
+        resp = c.post("/api/system/restart-nutwatch", headers={"Authorization": f"Bearer {raw_key}"})
         assert resp.status_code == 200
 
 
@@ -776,3 +794,185 @@ def test_history_variables_route_invalid_name():
     with app.test_client() as c:
         resp = c.get("/api/history/%22%22/variables")
         assert resp.status_code == 400
+
+
+# ── Viewer role: read endpoints allowed, mutating endpoints forbidden ──
+# Regression coverage: every pre-existing route used @require_admin for both
+# reads and writes, so a "viewer" account (created by the new accounts/API
+# keys system) was 403'd on the entire dashboard. Reads should use
+# @require_auth (any authenticated principal); only mutations stay
+# @require_admin.
+
+def _viewer_headers():
+    return {"Authorization": f"Bearer {_create_viewer_bearer()}"}
+
+
+def test_viewer_can_list_ups(monkeypatch):
+    monkeypatch.setattr("routes.ups.list_ups", lambda: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/ups", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_add_ups():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/ups", json={"name": "ups1"}, headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_list_users(monkeypatch):
+    monkeypatch.setattr("routes.users.list_users", lambda: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/users", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_add_user():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/users", json={"name": "bob"}, headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_read_upsmon_config(monkeypatch):
+    monkeypatch.setattr("routes.upsmon.get_upsmon_config", lambda: {})
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/upsmon/config", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_write_upsmon_config():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.put("/api/upsmon/config", json={}, headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_list_hooks(monkeypatch):
+    monkeypatch.setattr("routes.hooks.list_hooks", lambda n: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/hooks/myups", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_write_hook():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.put("/api/hooks/myups/ONLINE", json={"content": ""}, headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_read_config_file(monkeypatch):
+    monkeypatch.setattr("routes.system.get_config", lambda f: "content")
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/config/ups.conf", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_write_config_file():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.put("/api/config/ups.conf", data="x", headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_read_service_status_detailed(monkeypatch):
+    monkeypatch.setattr("routes.system.detailed_service_status", lambda: {})
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/service/status-detailed", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_can_read_system_resources(monkeypatch):
+    monkeypatch.setattr("routes.system.get_system_resources", lambda: {})
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/system/resources", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_trigger_service_action():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/service/restart-server", headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_cannot_reboot_system():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/system/reboot", headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_list_wol_targets(monkeypatch):
+    monkeypatch.setattr("routes.wol.wol_service.list_targets", lambda: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/wol/targets", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_can_list_wol_mappings(monkeypatch):
+    monkeypatch.setattr("routes.wol.wol_service.list_mappings", lambda: [])
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/wol/mappings", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_cannot_create_wol_target():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/wol/targets", json={"name": "pc1", "mac": "AA:BB:CC:DD:EE:FF"}, headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_cannot_wake_target():
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.post("/api/wol/targets/pc1/wake", headers=headers)
+        assert resp.status_code == 403
+
+
+def test_viewer_can_read_history(monkeypatch):
+    monkeypatch.setattr("routes.history.get_history", lambda ups, variables=None, since=0: {"ups": ups, "variables": {}})
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/history/myups", headers=headers)
+        assert resp.status_code == 200
+
+
+def test_viewer_can_read_recent_logs(monkeypatch):
+    monkeypatch.setattr("routes.logs.run_cmd", lambda *a, **k: (0, "", ""))
+    headers = _viewer_headers()
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/logs/recent", headers=headers)
+        assert resp.status_code == 200

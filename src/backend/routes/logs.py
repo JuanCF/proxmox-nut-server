@@ -3,14 +3,14 @@ import subprocess
 
 from flask import Blueprint, Response, stream_with_context, request, jsonify
 
-from auth import require_admin
+from auth import require_auth
 from utils import run_cmd
 
 logs_bp = Blueprint("logs", __name__)
 
 
 @logs_bp.route("/api/logs/stream")
-@require_admin
+@require_auth
 def stream_logs():
     proc = subprocess.Popen(
         [
@@ -52,7 +52,7 @@ def stream_logs():
 
 
 @logs_bp.route("/api/logs/recent")
-@require_admin
+@require_auth
 def recent_logs():
     lines = request.args.get("lines", "100")
     if not lines.isdigit():

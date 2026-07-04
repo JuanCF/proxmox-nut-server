@@ -15,7 +15,7 @@ build-tarball: build-frontend
 		--exclude '.pytest_cache' \
 		--exclude 'venv' \
 		--exclude 'tests' \
-		__init__.py app.py auth.py config.py utils.py \
+		__init__.py app.py auth.py manage.py config.py utils.py \
 		parsers/ services/ routes/ \
 		static/ scripts/ \
 		nutwatch.service requirements.txt

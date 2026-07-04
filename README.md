@@ -18,14 +18,14 @@ This repository also includes `vm/nut-vm.sh`, a bash script to automatically cre
 - **UPS Devices** — CRUD management with card-grid view showing real-time telemetry (battery charge bar, load bar, runtime, voltage), per-card driver start/stop/restart, USB scan integration, and recommended config defaults
 - **UPS Detail Telemetry** — Deep-dive view grouped by subsystem (Battery, Input, Output, UPS, Device, Driver) with color-coded charge/load bars, unit-formatted values (V, Hz, W, VA, °C, A), runtime formatting, and raw variable dump; D3 gauge visualizations for battery charge and load
 - **Historical Data & Charts** — Per-UPS time-series data collected every 60 seconds into SQLite, displayed as D3 line charts with selectable ranges (1h, 24h, 7d, 30d) and per-variable filtering; configurable poll interval and 90-day retention
-- **Users** — CRUD for NUT daemon users (upsd.users) with password masking and per-user roles (master/slave/admin)
+- **NUT Users** — CRUD for NUT daemon users (upsd.users) with password masking and per-user roles (master/slave/admin); distinct from dashboard **Accounts** (see below)
 - **Notifications** — Full upsmon.conf editor with monitor line management (add/remove/edit per UPS), global commands (MINSUPPLIES, SHUTDOWNCMD, NOTIFYCMD, POWERDOWNFLAG), timing parameters grid (POLLFREQ, POLLFREQALERT, HOSTSYNC, DEADTIME, etc.), and notification message/flag matrix for all 9 events with SYSLOG/WALL/EXEC/IGNORE checkboxes
 - **Per-UPS Event Hooks** — Fine-grained script hooks per UPS per event (ONLINE, ONBATT, LOWBATT, COMMOK, COMMBAD, SHUTDOWN, REPLBATT, NOCOMM, NOPARENT) with in-browser script editor (Tab support), status badges, and instant save/delete
 - **Live Log Streaming** — Real-time SSE log viewer tailing nut-server, nut-monitor, and nut-driver journals with pause/resume, auto-scroll, color-coded lines (error/warn/info), and configurable recent log loading
 - **Config Files** — Raw in-browser editor for ups.conf, upsd.conf, upsmon.conf, and upsd.users (read-only via this endpoint)
 - **Wake on LAN** — Manage WOL targets (MAC, broadcast, description), create event-to-target mappings for automatic wake on UPS events (ONLINE, ONBATT, etc.), manual "Wake Now" and "Wake All" buttons, and non-destructive auto-dispatch via notifycmd.sh; MAC address field shows a dropdown of hosts discovered from the ARP cache (with hostnames via reverse DNS) and auto-suggests the target name from the hostname
 - **Service Management** — One-click restart (nut-server, nut-monitor, or both) and per-UPS driver start/stop/restart with multi-fallback cleanup (upsdrvctl, systemctl, PID kill, pkill); system-level actions: restart NutWatch (with automatic page reload), reboot, and shutdown
-- **Bearer Token Auth** — API authentication via `NUTWATCH_API_KEY` env var; when unset, auth is disabled
+- **Accounts & API Keys** — Optional session login (admin/viewer roles) for the dashboard and per-user API keys (`Authorization: Bearer <key>`) for scripts; a key inherits its owner's role. Fully open until the first admin account is created via the first-run Setup page (or skipped, keeping the app open) or `manage.py create-admin`
 - **Atomic Config Writes** — All file writes use `tempfile` + `os.replace` to prevent corruption
 - **Input Validation** — Identifier regex, newline injection prevention, type checking on all inputs
 
@@ -59,7 +59,7 @@ This repository also includes `vm/nut-vm.sh`, a bash script to automatically cre
 - **Makefile** — `check`, `lint`, `fmt`, `fmt-fix`, `lint-python`, `test-python`, `tsc-check`, `lint-frontend`, `build-frontend`, `build-tarball`, `install-tools`
 - **`build-tarball`** — Creates `nutwatch.tar.gz` for release distribution (git-ignored)
 - **Backend Tests** — Pytest suite covering parsers, service layer (UPS, users, upsmon, hooks, WOL, system), auth, route handlers, and utility functions
-- **Frontend Tests** — Vitest suite covering components (Badge, Modal, ConfirmDialog, ErrorBoundary, theme) and utilities (API, format, logs, directives, service)
+- **Frontend Tests** — Vitest suite covering components (Badge, ConfirmDialog, Dashboard, ErrorBoundary, Gauge, HistoryChart, Modal, RestartPromptModal, Skeleton, theme, UpsCard, UpsDetail, WakeOnLan) and utilities (alerts, api, directives, format, logs, service)
 - **TypeScript** — Strict mode (`strict: true`, `noUnusedLocals`, `noUnusedParameters`) with ESLint flat config; `tsc --noEmit` and `eslint .` run as part of `make check`
 
 ---
@@ -122,7 +122,8 @@ Proxmox Host
 ```text
 src/backend/
 ├── app.py               # Flask application factory & entry point
-├── auth.py              # Bearer token authentication decorator
+├── auth.py              # Principal resolution (session cookie / Bearer key) + role checks
+├── manage.py            # CLI: create-admin, reset-password, list-accounts (bootstrap/recovery)
 ├── config.py            # Constants (NUT_DIR, regex, env vars)
 ├── utils.py             # Helpers (atomic write, run_cmd, upsc queries, driver stop)
 ├── parsers/             # Config file parsers (parse + serialize roundtrip)
@@ -138,7 +139,9 @@ src/backend/
 │   ├── hooks.py         # Per-UPS event hook file management
 │   ├── system.py        # Service/driver restart, config file raw I/O
 │   ├── wol.py           # WOL target/event registry, magic packet dispatch
-│   └── history.py       # SQLite collection, retention, and range queries
+│   ├── history.py       # SQLite collection, retention, and range queries
+│   ├── resources.py     # CPU, memory, and disk monitoring via psutil
+│   └── auth_db.py       # Accounts + API keys SQLite store (auth.db)
 ├── routes/              # Flask blueprints (API endpoints)
 │   ├── ups.py
 │   ├── users.py
@@ -147,12 +150,15 @@ src/backend/
 │   ├── system.py
 │   ├── logs.py          # SSE log streaming + recent log fetch
 │   ├── wol.py           # WOL target and event-mapping CRUD endpoints
-│   └── history.py       # Historical time-series data endpoints
+│   ├── history.py       # Historical time-series data endpoints
+│   └── auth.py          # Setup/login/logout/me, accounts CRUD, API key CRUD
 ├── static/              # Built React SPA (index.html + assets/)
 ├── tests/
 │   ├── test_parsers.py           # Parser roundtrip tests
-│   ├── test_auth.py              # Bearer auth tests
+│   ├── test_auth.py              # Principal resolution, role gating tests
 │   ├── test_routes.py            # API endpoint integration tests
+│   ├── test_routes_auth.py       # Setup/login/accounts/apikeys route tests
+│   ├── test_manage_cli.py        # CLI create-admin/reset-password/list-accounts tests
 │   ├── test_services_hooks.py    # Hook file CRUD tests
 │   ├── test_services_system.py   # Service/driver/config tests
 │   ├── test_services_ups.py      # UPS CRUD tests
@@ -160,20 +166,22 @@ src/backend/
 │   ├── test_services_users.py    # User CRUD tests
 │   ├── test_services_wol.py      # WOL target/mapping tests
 │   ├── test_services_history.py  # History collection/query tests
+│   ├── test_services_auth_db.py  # Account/API key store tests
 │   └── test_utils.py             # Utility function tests
 ├── scripts/
 │   ├── notifycmd.sh          # UPS event notify dispatcher (hooks + WOL)
 │   └── nutwatch-wol-dispatch # WOL auto-dispatch called by notifycmd.sh
 ├── nutwatch.service     # systemd unit file
-└── requirements.txt     # flask, pytest, wakeonlan
+└── requirements.txt     # flask, psutil, pytest, wakeonlan
 ```
 
 ### Frontend Module Layout
 
 ```text
 src/frontend/src/
-├── App.tsx              # Root component with section routing
-├── api.ts               # Fetch wrapper for /api/* (generic typed)
+├── App.tsx              # Root component with section routing + auth gating
+├── api.ts               # Fetch wrapper for /api/* (generic typed, 401 handling)
+├── AuthProvider.tsx      # Session/account context (status, login, logout, setup)
 ├── types.ts             # Shared TypeScript interfaces and types
 ├── constants/index.ts   # Section IDs, API paths, event lists, defaults
 ├── theme.tsx            # Light/dark theme provider
@@ -182,7 +190,8 @@ src/frontend/src/
 │   ├── components.css   # Shared component styles
 │   └── variables.css    # CSS custom properties (colors, spacing)
 ├── components/
-│   ├── Dashboard.tsx    # Stat cards + UPS/services overview
+│   ├── Dashboard.tsx    # Stat cards + UPS/services overview, resource gauges, system actions
+│   ├── ErrorBoundary.tsx # Error boundary with fallback UI
 │   ├── UpsDevices.tsx   # UPS card grid + scan/add/edit/delete
 │   ├── UpsCard.tsx      # Individual UPS card with metrics & actions
 │   ├── UpsDetail.tsx    # Deep-dive telemetry grouped by subsystem
@@ -192,18 +201,27 @@ src/frontend/src/
 │   ├── Users.tsx        # User table with CRUD
 │   ├── UserModal.tsx    # Add/edit user form
 │   ├── Notifications.tsx # Full upsmon.conf editor (monitors, messages, flags, timing)
+│   ├── RestartPromptModal.tsx # Restart prompt after config saves
 │   ├── HooksSection.tsx # Per-UPS event hook table
 │   ├── HookEditor.tsx   # In-browser script editor with Tab support
 │   ├── Logs.tsx         # Live SSE log viewer with pause/auto-scroll
 │   ├── WakeOnLan.tsx    # WOL target registry + event mapping management
 │   ├── ConfigFiles.tsx  # Raw config file editor
 │   ├── ServiceStatus.tsx # Service active/inline status bar
+│   ├── Skeleton.tsx     # Loading skeleton placeholder
 │   ├── Sidebar.tsx      # Navigation sidebar
 │   ├── Badge.tsx        # Status badge (online/onbatt/offline/unknown)
 │   ├── Modal.tsx        # Reusable modal dialog system
 │   ├── ConfirmDialog.tsx # Confirm/alert/dangerConfirm dialog system
-│   └── ThemeSettings.tsx # Theme toggle UI
+│   ├── ThemeSettings.tsx # Theme toggle UI
+│   ├── Setup.tsx        # First-run admin creation (with Skip)
+│   ├── Login.tsx        # Session login form
+│   ├── ApiKeys.tsx      # Self-service API key list/create/revoke
+│   ├── ApiKeyModal.tsx  # Create-key modal (shows raw key once)
+│   ├── Accounts.tsx     # Admin-only account table
+│   └── AccountModal.tsx # Add/edit account form with role selector
 └── utils/
+    ├── alerts.ts        # System alert/resource status helpers
     ├── directives.ts    # Key=value directive parsing/formatting
     ├── format.ts        # Runtime seconds → "Xh Ym" formatter
     ├── logs.ts          # Log line color classification
@@ -271,8 +289,25 @@ src/frontend/src/
 |--------|------|-------------|
 | `GET` | `/api/system/resources` | CPU%, memory usage/GB, and disk usage/GB |
 | `POST` | `/api/system/restart-nutwatch` | Restart the NutWatch web service (page reloads automatically) |
-| `POST` | `/api/system/reboot` | Reboot the entire system (requires `NUTWATCH_API_KEY`) |
-| `POST` | `/api/system/shutdown` | Shut down the system (requires `NUTWATCH_API_KEY`) |
+| `POST` | `/api/system/reboot` | Reboot the entire system (requires an admin account to be configured) |
+| `POST` | `/api/system/shutdown` | Shut down the system (requires an admin account to be configured) |
+
+### Auth (Accounts & API Keys)
+
+| Method | Path | Access | Description |
+|--------|------|--------|-------------|
+| `GET` | `/api/auth/status` | public | Bootstrap/authentication state |
+| `POST` | `/api/auth/setup` | first-run only | Create the first admin account (blocked once any account exists) |
+| `POST` | `/api/auth/login` | public | Username/password → session cookie (rate-limited) |
+| `POST` | `/api/auth/logout` | session | Clear session |
+| `GET` | `/api/auth/me` | session or key | Current identity + role |
+| `GET` | `/api/accounts` | admin | List accounts |
+| `POST` | `/api/accounts` | admin | Create an account |
+| `PUT` | `/api/accounts/<id>` | admin | Edit role/password/active status |
+| `DELETE` | `/api/accounts/<id>` | admin | Deactivate an account (soft delete) |
+| `GET` | `/api/apikeys` | any account | List the caller's own API keys (metadata only) |
+| `POST` | `/api/apikeys` | any account | Create a key — returns the raw key once |
+| `DELETE` | `/api/apikeys/<id>` | owner | Revoke one of the caller's own keys |
 
 ### Config Files
 
@@ -374,7 +409,8 @@ sudo NUT_UPS_NAME="myups" NUT_ADMIN_PASS="securepass" AUTO=1 bash scripts/setup.
 | `NUT_LISTEN_PORT` | `3493` | NUT listen port |
 | `NUTWATCH_REF` | `v1.1.2` | NutWatch release tag |
 | `NUTWATCH_URL_PREFIX` | _(unset)_ | Override tarball URL for local testing |
-| `NUTWATCH_API_KEY` | _(empty)_ | Bearer token for NutWatch API auth |
+
+After install, the app is fully open (no login). Create the first admin with `manage.py create-admin <username>` (run from the NutWatch install directory, e.g. `venv/bin/python manage.py create-admin admin`) to turn on session login and per-user API keys — or create it from the dashboard's first-run Setup page.
 
 #### Option B — NutWatch only (existing NUT setup)
 
@@ -438,11 +474,13 @@ COMMUNITY_SCRIPTS_URL=https://my-mirror.example.com bash vm/nut-vm.sh
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NUTWATCH_API_KEY` | _(empty)_ | Bearer token for API auth. If empty, auth is disabled. |
 | `NUTWATCH_HOST` | `0.0.0.0` | Listen address for the web server |
 | `NUTWATCH_PORT` | `8081` | Listen port for the web server |
 | `NUTWATCH_HISTORY_INTERVAL` | `60` | Seconds between UPS variable snapshots |
 | `NUTWATCH_HISTORY_RETENTION_DAYS` | `90` | Days of history to retain in SQLite |
+| `NUTWATCH_AUTH_DB` | `/var/lib/nutwatch/auth.db` | SQLite path for accounts + API keys |
+| `NUTWATCH_SECRET_KEY` | _(auto-generated)_ | Flask session signing key; auto-generated and persisted in the auth DB on first run if unset |
+| `NUTWATCH_SESSION_COOKIE_SECURE` | `false` | Set to `true` to mark the session cookie `Secure` (only if serving over HTTPS — plain-HTTP LAN deployments must leave this `false`) |
 
 #### scripts/setup.sh (--install-only mode)
 
@@ -450,7 +488,6 @@ COMMUNITY_SCRIPTS_URL=https://my-mirror.example.com bash vm/nut-vm.sh
 |----------|---------|-------------|
 | `NUTWATCH_REF` | `v1.1.2` | Git tag for release download URL |
 | `NUTWATCH_URL_PREFIX` | _(unset)_ | Override URL for testing local builds |
-| `NUTWATCH_API_KEY` | _(empty)_ | Bearer token for NutWatch API auth |
 
 ---
 

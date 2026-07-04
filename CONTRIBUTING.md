@@ -9,7 +9,7 @@ When cutting a new release (e.g. `v1.2.0`), update the version string in these f
 | `scripts/setup.sh` | `NUTWATCH_REF` default (line ~36) | `NUTWATCH_REF="${NUTWATCH_REF:-v1.2.0}"` |
 | `vm/nut-vm.sh` | `NUTWATCH_REF` default (line ~175) | `readonly NUTWATCH_REF="${NUTWATCH_REF:-v1.2.0}"` |
 | `src/frontend/package.json` | `version` field | `"version": "1.2.0"` |
-| `src/frontend/src/constants/index.ts` | `APP_VERSION` constant (line ~94) | `export const APP_VERSION = 'v1.2.0';` |
+| `src/frontend/src/constants/index.ts` | `APP_VERSION` constant (line ~99) | `export const APP_VERSION = 'v1.2.0';` |
 | `README.md` | `NUTWATCH_REF` in both env tables (lines ~375, ~451) | `\| \`NUTWATCH_REF\` \| \`v1.2.0\` \| ...` |
 
 Also check `scripts/setup.sh` for version strings in the header comment (line ~14) and the help output (line ~715).

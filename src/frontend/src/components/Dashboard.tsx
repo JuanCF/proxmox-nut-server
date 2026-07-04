@@ -8,7 +8,10 @@ import Gauge from './Gauge';
 import Skeleton from './Skeleton';
 import RestartPromptModal from './RestartPromptModal';
 import { useModal } from './Modal';
-import type { UpsDevice, UpsDetailData, ServicesMap, SystemResources } from '../types';
+import { useConfirm } from './ConfirmDialog';
+import { useAuth } from '../AuthProvider';
+import { errorMessage } from '../utils/alerts';
+import type { UpsDevice, UpsDetailData, ServicesMap, SystemResources, CommandResult } from '../types';
 
 type DetailMap = { [name: string]: UpsDetailData | undefined };
 
@@ -55,8 +58,9 @@ export default function Dashboard() {
   const [resources, setResources] = useState<SystemResources | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const { openModal, closeModal } = useModal();
+  const { alert } = useConfirm();
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -94,26 +98,47 @@ export default function Dashboard() {
 
   if (loading) return <SkeletonDashboard />;
 
-  const execAction = async (action: string, endpoint: string) => {
+  // The backend returns HTTP 200 with a { returncode, stdout, stderr } body even
+  // when the underlying command fails, so a non-zero returncode is an error.
+  const resultError = (res: CommandResult, label: string): string | null => {
+    if (res && typeof res.returncode === 'number' && res.returncode !== 0) {
+      return res.stderr?.trim() || res.stdout?.trim() || `${label} failed (exit ${res.returncode})`;
+    }
+    return null;
+  };
+
+  const execAction = async (action: string, endpoint: string, label: string) => {
     setActionPending(action);
-    setActionError(null);
     if (action === 'restart_nutwatch') {
       try {
-        await api(endpoint, { method: 'POST' });
+        const res = await api<CommandResult>(endpoint, { method: 'POST' });
+        const err = resultError(res, label);
+        if (err) {
+          setActionPending(null);
+          await alert(err, 'Error');
+          return;
+        }
         await waitForServerAndReload();
         return;
       } catch (e) {
-        setActionError((e as Error).message || 'Restart failed');
         setActionPending(null);
+        await alert(errorMessage(e) || 'Restart failed', 'Error');
         return;
       }
     }
+    let err: string | null = null;
     try {
-      await api(endpoint, { method: 'POST' });
-    } catch {
-      // reboot / shutdown may take the server down before response
+      const res = await api<CommandResult>(endpoint, { method: 'POST' });
+      err = resultError(res, label);
+    } catch (e) {
+      // A dropped connection is expected: a successful reboot/shutdown takes the
+      // server down before it can respond. Only surface real error responses.
+      if (!(e instanceof TypeError)) {
+        err = errorMessage(e) || `${label} failed`;
+      }
     }
     setActionPending(null);
+    if (err) await alert(err, 'Error');
   };
 
   const waitForServerAndReload = async () => {
@@ -132,6 +157,7 @@ export default function Dashboard() {
       await new Promise(r => setTimeout(r, 1000));
     }
     setActionPending(null);
+    await alert('NutWatch did not come back online. Please reload the page manually.', 'Error');
   };
 
   const confirmAction = (action: string, endpoint: string, label: string) => {
@@ -148,7 +174,7 @@ export default function Dashboard() {
         onClose={closeModal}
         onRestart={async () => {
           closeModal();
-          await execAction(action, endpoint);
+          await execAction(action, endpoint, label);
         }}
       />
     );
@@ -199,7 +225,7 @@ export default function Dashboard() {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </div>
           <div className="stat-value">{userCount != null ? userCount : '?'}</div>
-          <div className="stat-label">Users</div>
+          <div className="stat-label">NUT Users</div>
         </div>
         <div className="stat-card">
           <div className="stat-icon">
@@ -305,33 +331,30 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="dashboard-row dashboard-row-actions">
-        <div className="dashboard-card">
-          <h3>System Actions</h3>
-          {actionError && (
-            <div className="action-error" style={{ color: 'var(--red)', marginBottom: '0.75rem', fontSize: '0.875rem' }}>
-              {actionError}
+      {isAdmin && (
+        <div className="dashboard-row dashboard-row-actions">
+          <div className="dashboard-card">
+            <h3>System Actions</h3>
+            <div className="system-actions">
+              {actions.map(({ action, endpoint, label, icon }) => (
+                <button
+                  key={action}
+                  className={`system-action-btn ${action === 'shutdown' ? 'system-action-danger' : ''}`}
+                  disabled={actionPending !== null}
+                  onClick={() => confirmAction(action, endpoint, label)}
+                >
+                  {actionPending === action ? (
+                    <span className="spinner" />
+                  ) : (
+                    icon
+                  )}
+                  <span>{label}</span>
+                </button>
+              ))}
             </div>
-          )}
-          <div className="system-actions">
-            {actions.map(({ action, endpoint, label, icon }) => (
-              <button
-                key={action}
-                className={`system-action-btn ${action === 'shutdown' ? 'system-action-danger' : ''}`}
-                disabled={actionPending !== null}
-                onClick={() => confirmAction(action, endpoint, label)}
-              >
-                {actionPending === action ? (
-                  <span className="spinner" />
-                ) : (
-                  icon
-                )}
-                <span>{label}</span>
-              </button>
-            ))}
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

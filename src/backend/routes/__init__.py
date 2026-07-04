@@ -6,8 +6,9 @@ from .system import system_bp
 from .logs import logs_bp
 from .wol import wol_bp
 from .history import history_bp
+from .auth import auth_bp
 
 __all__ = [
     "ups_bp", "users_bp", "upsmon_bp", "hooks_bp", "system_bp",
-    "logs_bp", "wol_bp", "history_bp",
+    "logs_bp", "wol_bp", "history_bp", "auth_bp",
 ]

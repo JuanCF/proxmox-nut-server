@@ -3,6 +3,7 @@ import { api } from '../api';
 import { API, CONFIG_FILENAMES, READONLY_CONFIG } from '../constants';
 import { useConfirm } from './ConfirmDialog';
 import { useModal } from './Modal';
+import { useAuth } from '../AuthProvider';
 import RestartPromptModal from './RestartPromptModal';
 import type { CommandResult } from '../types';
 
@@ -12,6 +13,7 @@ export default function ConfigFiles() {
   const [readOnly, setReadOnly] = useState(false);
   const { alert } = useConfirm();
   const { openModal, closeModal } = useModal();
+  const { isAdmin } = useAuth();
 
   async function loadConfig(name: string) {
     setFilename(name);
@@ -67,14 +69,14 @@ export default function ConfigFiles() {
         ))}
       </div>
       <div className="toolbar">
-        <button className="primary" onClick={() => void saveConfig()}>Save</button>
+        {isAdmin && <button className="primary" onClick={() => void saveConfig()}>Save</button>}
         <span style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{filename}</span>
       </div>
       <textarea
         id="config-editor"
         value={content}
         onChange={e => setContent(e.target.value)}
-        readOnly={readOnly}
+        readOnly={readOnly || !isAdmin}
       />
     </>
   );

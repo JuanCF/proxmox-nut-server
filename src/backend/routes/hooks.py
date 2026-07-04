@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 
-from auth import require_admin
+from auth import require_admin, require_auth
 from services.hooks import get_hook, put_hook, delete_hook, list_hooks
 from config import IDENTIFIER_REGEX
 
@@ -8,7 +8,7 @@ hooks_bp = Blueprint("hooks", __name__)
 
 
 @hooks_bp.route("/api/hooks/<upsname>", methods=["GET"])
-@require_admin
+@require_auth
 def list_hooks_handler(upsname):
     if not IDENTIFIER_REGEX.match(upsname):
         return jsonify({"error": "invalid ups name"}), 400
@@ -16,7 +16,7 @@ def list_hooks_handler(upsname):
 
 
 @hooks_bp.route("/api/hooks/<upsname>/<event>", methods=["GET"])
-@require_admin
+@require_auth
 def get_hook_handler(upsname, event):
     if not IDENTIFIER_REGEX.match(upsname):
         return jsonify({"error": "invalid ups name"}), 400

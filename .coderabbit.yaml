@@ -110,12 +110,16 @@ reviews:
           appear at the end on success.
 
     # Flask API modules that write /etc/nut/ configs and run system commands.
-    # Auth: Bearer token via NUTWATCH_API_KEY env var (disabled if empty).
+    # Auth: accounts (admin/viewer) + per-user API keys, resolved in auth.py.
     - path: src/backend/**/*.py
       instructions: |
-        - Auth is Bearer token via `NUTWATCH_API_KEY` env var (in `config.py`).
-          If empty, auth is disabled (all requests allowed). The `@require_admin`
-          decorator lives in `auth.py`. Flag any new route that lacks it.
+        - Auth resolves a principal from a session cookie or a per-user
+          `Authorization: Bearer <key>` API key (`auth.resolve_principal()` in
+          `auth.py`; accounts/keys live in `services/auth_db.py`). A key
+          inherits its owner's role (admin/viewer). If no accounts exist yet,
+          auth is disabled (all requests allowed) — the bootstrap-open rule.
+          The `@require_admin` / `@require_auth` decorators live in `auth.py`.
+          Flag any new mutating route that lacks `@require_admin`.
         - Config writes must use `write_file()` from `utils.py` (atomic tempfile
           + os.replace). Never suggest `open(path, 'w')` for NUT config files.
         - `IDENTIFIER_REGEX` and `ALLOWED_CONFIGS` live in `config.py`. All
