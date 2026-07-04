@@ -105,7 +105,7 @@ export const CONFIG_FILENAMES = ['ups.conf', 'upsd.conf', 'upsmon.conf', 'upsd.u
 
 export const READONLY_CONFIG = 'upsd.users';
 
-export const APP_VERSION = 'v1.1.2';
+export const APP_VERSION = 'v1.2.0';
 
 export const MAX_LOG_LINES = 1000;
 
