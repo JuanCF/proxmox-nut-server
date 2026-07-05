@@ -68,19 +68,23 @@ This repository also includes `vm/nut-vm.sh`, a bash script to automatically cre
 
 | Dashboard | UPS Devices | UPS Detail (Info) |
 |:---:|:---:|:---:|
-| [![Dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) | [![UPS Devices](docs/screenshots/ups-devices.png)](docs/screenshots/ups-devices.png) | [![UPS Detail](docs/screenshots/ups-detail.png)](docs/screenshots/ups-detail.png) |
+| [![Dashboard](docs/screenshots/dashboard-v1.2.0.png)](docs/screenshots/dashboard-v1.2.0.png) | [![UPS Devices](docs/screenshots/ups-devices-v1.2.0.png)](docs/screenshots/ups-devices-v1.2.0.png) | [![UPS Detail](docs/screenshots/ups-detail-v1.2.0.png)](docs/screenshots/ups-detail-v1.2.0.png) |
 
 | UPS Charts (Input Voltage) | UPS Charts (Runtime) | Hooks |
 |:---:|:---:|:---:|
-| [![Input Voltage](docs/screenshots/ups-charts-voltage.png)](docs/screenshots/ups-charts-voltage.png) | [![Runtime](docs/screenshots/ups-charts-runtime.png)](docs/screenshots/ups-charts-runtime.png) | [![Hooks](docs/screenshots/hooks.png)](docs/screenshots/hooks.png) |
+| [![Input Voltage](docs/screenshots/ups-charts-voltage-v1.2.0.png)](docs/screenshots/ups-charts-voltage-v1.2.0.png) | [![Runtime](docs/screenshots/ups-charts-runtime-v1.2.0.png)](docs/screenshots/ups-charts-runtime-v1.2.0.png) | [![Hooks](docs/screenshots/hooks-v1.2.0.png)](docs/screenshots/hooks-v1.2.0.png) |
 
 | Users | Notifications | Logs |
 |:---:|:---:|:---:|
-| [![Users](docs/screenshots/users.png)](docs/screenshots/users.png) | [![Notifications](docs/screenshots/notifications.png)](docs/screenshots/notifications.png) | [![Logs](docs/screenshots/logs.png)](docs/screenshots/logs.png) |
+| [![Users](docs/screenshots/users-v1.2.0.png)](docs/screenshots/users-v1.2.0.png) | [![Notifications](docs/screenshots/notifications-v1.2.0.png)](docs/screenshots/notifications-v1.2.0.png) | [![Logs](docs/screenshots/logs-v1.2.0.png)](docs/screenshots/logs-v1.2.0.png) |
 
 | Config Files | Wake on LAN | Edit UPS |
 |:---:|:---:|:---:|
-| [![Config Files](docs/screenshots/config-files.png)](docs/screenshots/config-files.png) | [![Wake on LAN](docs/screenshots/wake-on-lan.png)](docs/screenshots/wake-on-lan.png) | [![Edit UPS](docs/screenshots/edit-ups.png)](docs/screenshots/edit-ups.png) |
+| [![Config Files](docs/screenshots/config-files-v1.2.0.png)](docs/screenshots/config-files-v1.2.0.png) | [![Wake on LAN](docs/screenshots/wake-on-lan-v1.2.0.png)](docs/screenshots/wake-on-lan-v1.2.0.png) | [![Edit UPS](docs/screenshots/edit-ups-v1.2.0.png)](docs/screenshots/edit-ups-v1.2.0.png) |
+
+| Setup (First Admin) | Accounts | Add Account |
+|:---:|:---:|:---:|
+| [![Setup](docs/screenshots/setup-v1.2.0.png)](docs/screenshots/setup-v1.2.0.png) | [![Accounts](docs/screenshots/accounts-v1.2.0.png)](docs/screenshots/accounts-v1.2.0.png) | [![Add Account](docs/screenshots/add-account-v1.2.0.png)](docs/screenshots/add-account-v1.2.0.png) |
 
 ---
 
