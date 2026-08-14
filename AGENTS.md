@@ -24,7 +24,7 @@ make install-tools  # apt-get shellcheck shfmt python3-pytest
 #   python3 -m venv .venv && source .venv/bin/activate && pip install -r src/backend/requirements.txt
 ```
 
-CI runs `shellcheck` + `shfmt -d -i 2` on `vm/*.sh` and Python lint + tests (see `.github/workflows/lint.yml`). `make check` reproduces the full local suite.
+CI runs `shellcheck` + `shfmt -d -i 2` on `vm/`, `src/backend/`, and `scripts/` (same set as the Makefile's `SHELL_FILES`) plus Python lint + tests (see `.github/workflows/lint.yml`). `make check` reproduces the full local suite.
 
 ## Shell Conventions
 

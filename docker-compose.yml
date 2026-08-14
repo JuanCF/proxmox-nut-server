@@ -1,0 +1,34 @@
+services:
+  nutwatch:
+    build: .
+    container_name: nutwatch
+    # USB access option A: privileged mode (simplest, required for hotplug).
+    privileged: true
+    # USB access option B: pass the host USB bus (more restrictive).
+    # Uncomment the next two lines and remove/comment `privileged: true` if you
+    # know the UPS is already plugged in when the container starts.
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb
+    ports:
+      - "8081:8081"
+      - "3493:3493"
+    volumes:
+      - nutwatch-config:/etc/nut
+      - nutwatch-data:/var/lib/nutwatch
+    environment:
+      - NUT_UPS_NAME=ups
+      - NUT_UPS_DESC=My UPS
+      - NUT_DRIVER=usbhid-ups
+      - NUT_ADMIN_USER=admin
+      # Change this before first start; it is only used to create upsd.users.
+      - NUT_ADMIN_PASS=changeme
+      - NUT_MONITOR_USER=monuser
+      # Change this before first start.
+      - NUT_MONITOR_PASS=changeme
+      # Generate a strong secret, at least 32 characters.
+      - NUTWATCH_SECRET_KEY=change-me-to-a-long-random-string-at-least-32-chars
+    restart: unless-stopped
+
+volumes:
+  nutwatch-config:
+  nutwatch-data:

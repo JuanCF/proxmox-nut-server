@@ -426,6 +426,69 @@ curl -fsSL https://raw.githubusercontent.com/JuanCF/nutwatch/main/scripts/setup.
 
 Set the `NUTWATCH_REF` env var to pin a specific release version.
 
+### Docker
+
+A multi-stage `Dockerfile` and `docker-compose.yml` are included. The image
+bundles NUT, the NutWatch backend, and a built React frontend.
+
+```bash
+# Build and run with Docker Compose
+docker compose up -d
+
+# Or build and run manually
+docker build -t nutwatch .
+docker run -d \
+  --name nutwatch \
+  --privileged \
+  -p 8081:8081 \
+  -p 3493:3493 \
+  -v nutwatch-config:/etc/nut \
+  -v nutwatch-data:/var/lib/nutwatch \
+  -e NUT_ADMIN_PASS=changeme \
+  -e NUT_MONITOR_PASS=changeme \
+  -e NUTWATCH_SECRET_KEY='a-very-long-random-string-at-least-32-characters' \
+  nutwatch
+```
+
+**USB access.** NUT drivers need to talk to the UPS over USB. The easiest way
+is to run the container `--privileged` and pass the host USB bus:
+
+```bash
+docker run -d --privileged -v /dev/bus/usb:/dev/bus/usb ... nutwatch
+```
+
+If you know the exact USB device node (for example `/dev/usb/hiddev0`), you
+can use `--device` instead of `--privileged`:
+
+```bash
+docker run -d --device /dev/usb/hiddev0 ... nutwatch
+```
+
+Inside `docker-compose.yml`, `privileged: true` is enabled by default. Replace
+it with the `devices:` block if you prefer a more restrictive setup.
+
+**Persistent data.** Two volumes are used:
+
+- `/etc/nut` — NUT configuration files (`ups.conf`, `upsd.users`, `upsmon.conf`,
+  hooks in `notify.d/`, etc.)
+- `/var/lib/nutwatch` — NutWatch account/API-key database and UPS history SQLite
+  database
+
+**Container notes.**
+
+- The container uses `supervisord` instead of `systemd`. A small `systemctl`
+  shim maps the UI's service-restart actions to `supervisorctl` so NUT service
+  restarts still work.
+- System-level actions (reboot/shutdown) are disabled inside the container.
+- Live log streaming relies on `journalctl`; in the container this is not
+  available. Use `docker exec nutwatch tail -f /var/log/supervisor/upsd.log` or
+  inspect the individual supervisor log files instead.
+- Wake on LAN: magic packets default to the `255.255.255.255` broadcast,
+  which does not leave Docker's default bridge network. For WOL to reach
+  hosts on your LAN, either run the container with `--network host`
+  (`network_mode: host` in compose) or set a directed broadcast address
+  (e.g. `192.168.1.255`) on each WOL target.
+
 ### Proxmox VM (One-Liner)
 
 ```bash

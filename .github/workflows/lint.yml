@@ -14,11 +14,12 @@ jobs:
       - name: Install tools
         run: sudo apt-get install -y shellcheck shfmt
 
+      # Same file set as `make lint` / `make fmt` (see Makefile SHELL_FILES).
       - name: shellcheck
-        run: find vm/ -name "*.sh" -print0 | xargs -0 shellcheck
+        run: find vm/ src/backend/ scripts/ -name "*.sh" -print0 | xargs -0 shellcheck
 
       - name: shfmt
-        run: find vm/ -name "*.sh" -print0 | xargs -0 shfmt -d -i 2
+        run: find vm/ src/backend/ scripts/ -name "*.sh" -print0 | xargs -0 shfmt -d -i 2
 
   lint-python:
     runs-on: ubuntu-latest
