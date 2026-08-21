@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nut-server \
     nut-client \
     usbutils \
+    busybox-syslogd \
     python3 \
     python3-venv \
     supervisor \
@@ -35,7 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nut/ups.conf /etc/nut/upsd.conf /etc/nut/upsd.users \
-             /etc/nut/upsmon.conf /etc/nut/nut.conf
+             /etc/nut/upsmon.conf /etc/nut/nut.conf \
+    && rm -f /etc/syslog.conf
 
 WORKDIR $NUTWATCH_DIR
 

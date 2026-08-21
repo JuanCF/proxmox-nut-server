@@ -126,6 +126,16 @@ chmod 640 /etc/nut/*.conf /etc/nut/upsd.users 2>/dev/null || true
 chown root:nut /etc/nut/notify.d && chmod 750 /etc/nut/notify.d
 chown nut:nut /var/log/nut /var/run/nut
 
+# NUT daemons log via syslog(3), which is silently dropped when no syslog
+# daemon is running (the container has no journald), leaving the NutWatch
+# Logs tab empty. busybox syslogd is tiny, daemonizes on its own and captures
+# everything to /var/log/messages, which the backend tails when journald is
+# unavailable.
+touch /var/log/messages
+if command -v busybox >/dev/null 2>&1; then
+  busybox syslogd -O /var/log/messages
+fi
+
 # Start USB drivers. This may fail if no USB device is present yet or if the
 # configuration is intentionally empty; upsd/upsmon will keep retrying and the
 # UI can start drivers later via upsdrvctl.
