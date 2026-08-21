@@ -426,6 +426,18 @@ curl -fsSL https://raw.githubusercontent.com/JuanCF/nutwatch/main/scripts/setup.
 
 Set the `NUTWATCH_REF` env var to pin a specific release version.
 
+**Resetting a lost NutWatch account password.** If you're locked out of the
+UI, reset the password from the shell on the machine running NutWatch:
+
+```bash
+sudo /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password USERNAME
+```
+
+You'll be prompted for the new password (or pipe it with `--password-stdin`
+for scripting). `list-accounts` shows configured usernames; `create-admin
+<username>` also resets an existing account's password and guarantees the
+admin role.
+
 ### Docker
 
 A multi-stage `Dockerfile` and `docker-compose.yml` are included. The image
@@ -474,6 +486,17 @@ the first start. Because `upsd.users` is only initialized on first start,
 rotate existing credentials via the NutWatch UI (NUT Users tab, which
 restarts NUT automatically) or the Config Files tab instead of environment
 variables.
+
+**Password recovery.** Locked out of the UI? Reset a NutWatch account
+password from inside the container:
+
+```bash
+docker exec -it nutwatch /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password USERNAME
+```
+
+The same CLI handles bootstrap and listing: `list-accounts` shows usernames,
+`create-admin <username>` promotes an existing account and resets its
+password.
 
 **Persistent data.** Two volumes are used:
 
