@@ -1,0 +1,45 @@
+services:
+  nutwatch:
+    build: .
+    container_name: nutwatch
+    # USB access: mount the host USB bus and allow USB character devices via
+    # the device cgroup. The cgroup rule is evaluated when devices appear, so
+    # UPS hotplug works without privileged mode. Trust boundary: the container
+    # can then drive every USB device on the host bus. To scope it down,
+    # replace the mount with a specific /dev/bus/usb/<bus>/<dev> device when
+    # your UPS always reappears at the same path.
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - 'c 189:* rwm'
+    # Fallback: replace the two blocks above with `privileged: true` if USB
+    # access still fails on your setup.
+    # Share the host network stack: WOL device discovery needs the LAN's ARP
+    # table, and magic-packet broadcasts must reach the physical network.
+    # With host networking, `ports:` is ignored; NutWatch serves directly on
+    # host ports 8081 (UI) and 3493 (NUT). Note: until the first admin
+    # account is created on the Setup page, the UI is open — run the first
+    # `docker compose up` on a trusted network and finish setup promptly.
+    network_mode: host
+    volumes:
+      - nutwatch-config:/etc/nut
+      - nutwatch-data:/var/lib/nutwatch
+    environment:
+      - NUT_UPS_NAME=ups
+      - NUT_UPS_DESC=My UPS
+      - NUT_DRIVER=usbhid-ups
+      - NUT_ADMIN_USER=admin
+      - NUT_MONITOR_USER=monuser
+      # Optional. Credentials are generated on first start and persisted in
+      # the nutwatch-config volume. Set these before the first
+      # `docker compose up` to use your own:
+      # - NUT_ADMIN_PASS=your-admin-password
+      # - NUT_MONITOR_PASS=your-monitor-password
+      # Optional. Flask session signing key (>= 32 characters). If unset, the
+      # backend generates a random key and persists it in nutwatch-data.
+      # - NUTWATCH_SECRET_KEY=your-long-random-secret
+    restart: unless-stopped
+
+volumes:
+  nutwatch-config:
+  nutwatch-data:

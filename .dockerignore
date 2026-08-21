@@ -1,0 +1,29 @@
+# Git
+.git
+.github
+
+# Python virtual environments
+.venv
+src/backend/.venv
+src/backend/__pycache__
+src/backend/.pytest_cache
+**/__pycache__
+**/.pytest_cache
+
+# Frontend build intermediates
+src/frontend/node_modules
+src/frontend/dist
+
+# Distribution artifacts
+nutwatch.tar.gz
+
+# Editor / local config
+.opencode
+.claude
+.coderabbit.yaml
+.playwright-cli
+.vscode
+.idea
+
+# Documentation assets (not needed at runtime)
+docs/screenshots

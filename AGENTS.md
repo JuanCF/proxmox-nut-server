@@ -24,7 +24,7 @@ make install-tools  # apt-get shellcheck shfmt python3-pytest
 #   python3 -m venv .venv && source .venv/bin/activate && pip install -r src/backend/requirements.txt
 ```
 
-CI runs `shellcheck` + `shfmt -d -i 2` on `vm/*.sh` and Python lint + tests (see `.github/workflows/lint.yml`). `make check` reproduces the full local suite.
+CI runs `shellcheck` + `shfmt -d -i 2` on `vm/`, `src/backend/`, and `scripts/` (same set as the Makefile's `SHELL_FILES`) plus Python lint + tests (see `.github/workflows/lint.yml`). `make check` reproduces the full local suite.
 
 ## Shell Conventions
 
@@ -63,6 +63,7 @@ CI runs `shellcheck` + `shfmt -d -i 2` on `vm/*.sh` and Python lint + tests (see
 - Slow DHCP / guest agent: retries for up to 5 minutes.
 - virt-customize network failure on Debian 13 (Proxmox VE 9): auto-installs `dhcpcd-base` when missing.
 - NUT service enablement varies by distro: `nut-driver-enumerator` → `nut-driver@` → `nut-driver`. Each unit is enabled individually with `|| true` so missing units don't abort the whole run.
+- NUT 2.8.x has no bare `nut-driver.service` on most distros (drivers run as `nut-driver@<name>` instances); `services/system.py::_driver_status_units()` resolves the right unit for status/restart and `routes/logs.py::_journal_units()` uses it for journalctl, falling back to pid-file checks or `upsdrvctl`.
 - NutWatch install failure inside virt-customize: wrapped in `&& ... || echo` so a download failure doesn't abort the VM setup.
 - Script interruption: `trap ERR` calls `error_handler`, `trap EXIT` runs `cleanup` (removes temp dir and working disk image), and `trap SIGINT/SIGTERM` posts failure to the API before exiting.
 - Hook ownership: per-UPS hook scripts must be `root:nut 750` so `upsmon` (running as the `nut` user) can execute them. `services/hooks.py::put_hook()` explicitly `chown`s to `root:nut` after writing.

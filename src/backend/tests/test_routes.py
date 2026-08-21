@@ -112,6 +112,86 @@ def test_recent_logs(monkeypatch):
         assert data["returncode"] == 0
 
 
+def test_recent_logs_syslog_fallback(monkeypatch, tmp_path):
+    orig = routes.logs.run_cmd
+    log_file = tmp_path / "messages"
+    log_file.write_text("syslog line 1\nsyslog line 2\n")
+
+    def fake_run_cmd(cmd, **kw):
+        if cmd[0] == "journalctl":
+            return (0, "-- No entries --\n", "No journal files were found.\n")
+        return orig(cmd, **kw)
+
+    monkeypatch.setattr("routes.logs.SYSLOG_FILE", str(log_file))
+    monkeypatch.setattr("routes.logs.run_cmd", fake_run_cmd)
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/logs/recent")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["returncode"] == 0
+        assert "syslog line 1" in data["stdout"]
+        assert "syslog line 2" in data["stdout"]
+
+
+def test_recent_logs_syslog_fallback_missing_file(monkeypatch):
+    monkeypatch.setattr("routes.logs.SYSLOG_FILE", "/nonexistent/nutwatch/messages")
+    monkeypatch.setattr(
+        "routes.logs.run_cmd",
+        lambda cmd, **kw: (0, "-- No entries --\n", "No journal files were found.\n"),
+    )
+    app = _register_all(_make_app())
+    with app.test_client() as c:
+        resp = c.get("/api/logs/recent")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["returncode"] == 0
+        assert data["stdout"] == ""
+
+
+def test_journal_available_false_when_no_journal(monkeypatch):
+    monkeypatch.setattr(
+        "routes.logs.run_cmd",
+        lambda cmd, **kw: (0, "-- No entries --\n", "No journal files were found.\n"),
+    )
+    assert routes.logs._journal_available() is False
+
+
+def test_journal_available_true_with_journal(monkeypatch):
+    monkeypatch.setattr(
+        "routes.logs.run_cmd",
+        lambda cmd, **kw: (0, "Jun 01 00:00:00 host upsd[1]: started\n", ""),
+    )
+    assert routes.logs._journal_available() is True
+
+
+def test_journal_available_false_when_binary_missing(monkeypatch):
+    # utils.run_cmd returns (-1, "", "<error>") when the binary is absent.
+    monkeypatch.setattr("routes.logs.run_cmd", lambda cmd, **kw: (-1, "", "journalctl: not found"))
+    assert routes.logs._journal_available() is False
+
+
+def test_recent_command_uses_journalctl_when_available(monkeypatch):
+    monkeypatch.setattr("routes.logs._driver_status_units", lambda: ["nut-driver@ups"])
+    cmd = routes.logs._recent_command("50", True)
+    assert cmd[0] == "journalctl"
+    assert "-n" in cmd and "50" in cmd
+    for unit in ("nut-server", "nut-monitor", "nut-driver@ups"):
+        assert "-u" in cmd and unit in cmd
+
+
+def test_recent_command_uses_tail_in_fallback(monkeypatch):
+    monkeypatch.setattr("routes.logs.SYSLOG_FILE", "/var/log/messages")
+    cmd = routes.logs._recent_command("50", False)
+    assert cmd == ["tail", "-n", "50", "/var/log/messages"]
+
+
+def test_stream_command_journal_and_fallback(monkeypatch):
+    assert routes.logs._stream_command(True)[0] == "journalctl"
+    monkeypatch.setattr("routes.logs.SYSLOG_FILE", "/var/log/messages")
+    assert routes.logs._stream_command(False) == ["tail", "-F", "-n", "0", "/var/log/messages"]
+
+
 # ── System routes ─────────────────────────────────────────────────────
 
 def test_get_config_route(monkeypatch):
