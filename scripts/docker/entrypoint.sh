@@ -65,6 +65,9 @@ if [[ ! -f /etc/nut/ups.conf ]]; then
   port = auto
   desc = "${NUT_UPS_DESC}"
   pollinterval = 5
+  # Run the driver as root: host USB device nodes are typically root-owned
+  # (mode 660/664) and the container's 'nut' user has no write access to them.
+  user = root
 EOF
 fi
 
