@@ -9,9 +9,11 @@ services:
     # know the UPS is already plugged in when the container starts.
     # devices:
     #   - /dev/bus/usb:/dev/bus/usb
-    ports:
-      - "8081:8081"
-      - "3493:3493"
+    # Share the host network stack: WOL device discovery needs the LAN's ARP
+    # table, and magic-packet broadcasts must reach the physical network.
+    # With host networking, `ports:` is ignored; NutWatch serves directly on
+    # host ports 8081 (UI) and 3493 (NUT).
+    network_mode: host
     volumes:
       - nutwatch-config:/etc/nut
       - nutwatch-data:/var/lib/nutwatch

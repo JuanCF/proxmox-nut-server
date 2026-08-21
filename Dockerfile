@@ -28,6 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nut-client \
     usbutils \
     busybox-syslogd \
+    iproute2 \
+    iputils-arping \
+    iputils-ping \
     python3 \
     python3-venv \
     supervisor \
