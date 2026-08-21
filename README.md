@@ -430,7 +430,7 @@ Set the `NUTWATCH_REF` env var to pin a specific release version.
 UI, reset the password from the shell on the machine running NutWatch:
 
 ```bash
-sudo /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password <username>
+sudo /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password USERNAME
 ```
 
 You'll be prompted for the new password (or pipe it with `--password-stdin`
@@ -491,7 +491,7 @@ variables.
 password from inside the container:
 
 ```bash
-docker exec -it nutwatch /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password <username>
+docker exec -it nutwatch /opt/nutwatch/venv/bin/python /opt/nutwatch/manage.py reset-password USERNAME
 ```
 
 The same CLI handles bootstrap and listing: `list-accounts` shows usernames,
