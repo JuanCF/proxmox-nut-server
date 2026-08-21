@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 
@@ -22,13 +24,50 @@ def test_restart_monitor(monkeypatch):
     assert rc == 0
 
 
-def test_restart_driver(monkeypatch):
+def test_restart_driver_bare_unit(monkeypatch):
     calls = []
-    monkeypatch.setattr("services.system.run_cmd", lambda cmd, **kw: (calls.append(cmd), _fake_rc(0))[1])
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "list-unit-files" in cmd:
+            return _fake_rc(0, "nut-driver.service enabled")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
     from services.system import restart_driver
     rc, _, _ = restart_driver()
     assert rc == 0
-    assert any("nut-driver" in c for c in calls)
+    assert calls[-1] == ["systemctl", "restart", "nut-driver"]
+
+
+def test_restart_driver_template_units(monkeypatch):
+    calls = []
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "list-unit-files" in cmd:
+            return _fake_rc(1, "0 unit files listed.")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: ["ups1", "ups2"])
+    from services.system import restart_driver
+    rc, _, _ = restart_driver()
+    assert rc == 0
+    assert ["systemctl", "restart", "nut-driver@ups1"] in calls
+    assert ["systemctl", "restart", "nut-driver@ups2"] in calls
+
+
+def test_restart_driver_upsdrvctl_fallback(monkeypatch):
+    calls = []
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "list-unit-files" in cmd:
+            return _fake_rc(1, "0 unit files listed.")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: [])
+    from services.system import restart_driver
+    rc, _, _ = restart_driver()
+    assert rc == 0
+    assert ["upsdrvctl", "stop"] in calls
+    assert ["upsdrvctl", "start"] in calls
 
 
 def test_restart_all(monkeypatch):
@@ -56,16 +95,53 @@ def test_restart_all_fails(monkeypatch):
 
 
 def test_detailed_service_status(monkeypatch):
-    states = iter(["active", "inactive", "active"])
     def fake_run(cmd, **kw):
-        state = next(states)
-        rc = 0 if state == "active" else 3
-        return _fake_rc(rc, state)
+        if "list-unit-files" in cmd:
+            return _fake_rc(0, "nut-driver.service enabled")
+        if cmd[:2] == ["systemctl", "is-active"]:
+            if "nut-driver" in cmd[2:]:
+                return _fake_rc(0, "active")
+            if "nut-server" in cmd[2:]:
+                return _fake_rc(3, "inactive")
+            return _fake_rc(0, "active")
+        return _fake_rc(0)
     monkeypatch.setattr("services.system.run_cmd", fake_run)
     from services.system import detailed_service_status
     result = detailed_service_status()
     assert result["nut-driver"]["active"] is True
     assert result["nut-server"]["active"] is False
+    assert result["nut-monitor"]["active"] is True
+
+
+def test_detailed_service_status_template_instances(monkeypatch):
+    def fake_run(cmd, **kw):
+        if "list-unit-files" in cmd:
+            return _fake_rc(1, "0 unit files listed.")
+        if cmd[:2] == ["systemctl", "is-active"]:
+            if "nut-driver" in cmd[2:]:
+                assert cmd[2:] == ["nut-driver@ups"]
+            return _fake_rc(0, "active")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: ["ups"])
+    from services.system import detailed_service_status
+    result = detailed_service_status()
+    assert result["nut-driver"]["active"] is True
+
+
+def test_detailed_service_status_pidfile_fallback(monkeypatch, tmp_path):
+    def fake_run(cmd, **kw):
+        if "list-unit-files" in cmd:
+            return _fake_rc(1, "0 unit files listed.")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: [])
+    monkeypatch.setattr("services.system.glob.glob", lambda p: [str(tmp_path / "ups.pid")])
+    (tmp_path / "ups.pid").write_text(str(os.getpid()))
+    from services.system import detailed_service_status
+    result = detailed_service_status()
+    assert result["nut-driver"]["active"] is True
+    assert result["nut-driver"]["state"] == "active"
 
 
 def test_service_status(monkeypatch):

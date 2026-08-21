@@ -23,12 +23,12 @@ generate_password() {
 
 if [[ -z "$NUT_ADMIN_PASS" ]]; then
   NUT_ADMIN_PASS="$(generate_password 16)"
-  echo "[nutwatch] Generated NUT admin password: $NUT_ADMIN_PASS"
+  echo "[nutwatch] Generated NUT admin credentials."
 fi
 
 if [[ -z "$NUT_MONITOR_PASS" ]]; then
   NUT_MONITOR_PASS="$(generate_password 16)"
-  echo "[nutwatch] Generated NUT monitor password: $NUT_MONITOR_PASS"
+  echo "[nutwatch] Generated NUT monitor credentials."
 fi
 
 mkdir -p /etc/nut/notify.d /var/log/nut /var/run/nut /var/lib/nutwatch /var/log/supervisor

@@ -5,6 +5,7 @@ import subprocess
 from flask import Blueprint, Response, stream_with_context, request, jsonify
 
 from auth import require_auth
+from services.system import _driver_status_units
 from utils import run_cmd
 
 logs_bp = Blueprint("logs", __name__)
@@ -13,7 +14,12 @@ logs_bp = Blueprint("logs", __name__)
 # Docker container, where NUT daemons log via syslog()).
 SYSLOG_FILE = os.environ.get("NUTWATCH_SYSLOG_FILE", "/var/log/messages")
 
-JOURNAL_UNITS = ["nut-server", "nut-monitor", "nut-driver"]
+
+def _journal_units() -> list[str]:
+    # The driver has no bare nut-driver.service on most NUT 2.8.x distros
+    # (drivers run as nut-driver@<name> instances), so resolve the unit names
+    # the same way service status does, or journalctl would drop driver logs.
+    return ["nut-server", "nut-monitor", *_driver_status_units()]
 
 
 def _journal_available() -> bool:
@@ -31,7 +37,7 @@ def _journal_available() -> bool:
 def _recent_command(lines: str, journal: bool) -> list:
     if journal:
         cmd = ["journalctl", "--no-pager", "-n", lines]
-        for unit in JOURNAL_UNITS:
+        for unit in _journal_units():
             cmd += ["-u", unit]
         return cmd
     return ["tail", "-n", lines, SYSLOG_FILE]
@@ -40,7 +46,7 @@ def _recent_command(lines: str, journal: bool) -> list:
 def _stream_command(journal: bool) -> list:
     if journal:
         cmd = ["journalctl", "--no-pager", "-f", "-n", "0"]
-        for unit in JOURNAL_UNITS:
+        for unit in _journal_units():
             cmd += ["-u", unit]
         return cmd
     return ["tail", "-F", "-n", "0", SYSLOG_FILE]

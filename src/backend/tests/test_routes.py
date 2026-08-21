@@ -172,10 +172,11 @@ def test_journal_available_false_when_binary_missing(monkeypatch):
 
 
 def test_recent_command_uses_journalctl_when_available(monkeypatch):
+    monkeypatch.setattr("routes.logs._driver_status_units", lambda: ["nut-driver@ups"])
     cmd = routes.logs._recent_command("50", True)
     assert cmd[0] == "journalctl"
     assert "-n" in cmd and "50" in cmd
-    for unit in ("nut-server", "nut-monitor", "nut-driver"):
+    for unit in ("nut-server", "nut-monitor", "nut-driver@ups"):
         assert "-u" in cmd and unit in cmd
 
 

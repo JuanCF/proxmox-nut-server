@@ -2,13 +2,15 @@ services:
   nutwatch:
     build: .
     container_name: nutwatch
-    # USB access option A: privileged mode (simplest, required for hotplug).
-    privileged: true
-    # USB access option B: pass the host USB bus (more restrictive).
-    # Uncomment the next two lines and remove/comment `privileged: true` if you
-    # know the UPS is already plugged in when the container starts.
-    # devices:
-    #   - /dev/bus/usb:/dev/bus/usb
+    # USB access: mount the host USB bus and allow USB character devices via
+    # the device cgroup. The cgroup rule is evaluated when devices appear, so
+    # UPS hotplug works without privileged mode.
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - 'c 189:* rwm'
+    # Fallback: replace the two blocks above with `privileged: true` if USB
+    # access still fails on your setup.
     # Share the host network stack: WOL device discovery needs the LAN's ARP
     # table, and magic-packet broadcasts must reach the physical network.
     # With host networking, `ports:` is ignored; NutWatch serves directly on
@@ -22,13 +24,15 @@ services:
       - NUT_UPS_DESC=My UPS
       - NUT_DRIVER=usbhid-ups
       - NUT_ADMIN_USER=admin
-      # Change this before first start; it is only used to create upsd.users.
-      - NUT_ADMIN_PASS=changeme
       - NUT_MONITOR_USER=monuser
-      # Change this before first start.
-      - NUT_MONITOR_PASS=changeme
-      # Generate a strong secret, at least 32 characters.
-      - NUTWATCH_SECRET_KEY=change-me-to-a-long-random-string-at-least-32-chars
+      # Optional. Credentials are generated on first start and persisted in
+      # the nutwatch-config volume. Set these before the first
+      # `docker compose up` to use your own:
+      # - NUT_ADMIN_PASS=your-admin-password
+      # - NUT_MONITOR_PASS=your-monitor-password
+      # Optional. Flask session signing key (>= 32 characters). If unset, the
+      # backend generates a random key and persists it in nutwatch-data.
+      # - NUTWATCH_SECRET_KEY=your-long-random-secret
     restart: unless-stopped
 
 volumes:

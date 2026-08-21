@@ -35,6 +35,50 @@ driver_running() {
   return 1
 }
 
+name_pid_alive() {
+  local pid
+  pid="$(cat "/var/run/nut/${1}.pid" 2>/dev/null || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+# Dispatch driver lifecycle actions through upsdrvctl. Mirror systemctl:
+# stopping an inactive driver is a success.
+driver_action() {
+  local action="$1" svc="$2" name=""
+  case "$svc" in
+  nut-driver@*) name="${svc#nut-driver@}" ;;
+  esac
+  case "$action" in
+  stop)
+    if [[ -n "$name" ]]; then
+      name_pid_alive "$name" || return 0
+      upsdrvctl stop "$name"
+    else
+      driver_running || return 0
+      upsdrvctl stop
+    fi
+    ;;
+  restart)
+    # upsdrvctl has no restart verb; the stop is best-effort because the
+    # driver may not be running yet.
+    if [[ -n "$name" ]]; then
+      upsdrvctl stop "$name" 2>/dev/null || true
+      upsdrvctl start "$name"
+    else
+      upsdrvctl stop 2>/dev/null || true
+      upsdrvctl start
+    fi
+    ;;
+  start)
+    if [[ -n "$name" ]]; then
+      upsdrvctl start "$name"
+    else
+      upsdrvctl start
+    fi
+    ;;
+  esac
+}
+
 is_active() {
   local svc="$1" target
   target="$(map_service "$svc")"
@@ -59,6 +103,11 @@ restart | start | stop)
     target="$(map_service "$svc")"
     if [[ -n "$target" ]]; then
       supervisorctl "$cmd" "$target" || rc=$?
+    elif [[ "$svc" == "nut-driver" || "$svc" == nut-driver@* ]]; then
+      driver_action "$cmd" "$svc" || rc=$?
+    else
+      printf 'Unsupported service: %s\n' "$svc" >&2
+      rc=4
     fi
   done
   exit "$rc"
