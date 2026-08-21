@@ -70,6 +70,42 @@ def test_restart_driver_upsdrvctl_fallback(monkeypatch):
     assert ["upsdrvctl", "start"] in calls
 
 
+def test_restart_driver_ignores_template_unit_row(monkeypatch):
+    # list-unit-files may exit 0 while listing only the nut-driver@.service
+    # template; only a row whose first field is exactly nut-driver.service
+    # selects the bare unit.
+    calls = []
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "list-unit-files" in cmd:
+            return _fake_rc(0, "nut-driver@.service  enabled         enabled")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: ["ups1"])
+    from services.system import restart_driver
+    rc, _, _ = restart_driver()
+    assert rc == 0
+    assert ["systemctl", "restart", "nut-driver@ups1"] in calls
+
+
+def test_restart_driver_upsdrvctl_stop_failure_propagates(monkeypatch):
+    calls = []
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "list-unit-files" in cmd:
+            return _fake_rc(1, "0 unit files listed.")
+        if cmd == ["upsdrvctl", "stop"]:
+            return _fake_rc(1, "", "stop failed")
+        return _fake_rc(0)
+    monkeypatch.setattr("services.system.run_cmd", fake_run)
+    monkeypatch.setattr("services.system._ups_names", lambda: [])
+    from services.system import restart_driver
+    rc, _, err = restart_driver()
+    assert rc == 1
+    assert "stop failed" in err
+    assert ["upsdrvctl", "start"] in calls
+
+
 def test_restart_all(monkeypatch):
     calls = []
     def fake_run(cmd, **kw):

@@ -33,8 +33,10 @@ def _driver_status_units() -> list[str]:
         ["systemctl", "list-unit-files", "--no-legend", "--no-pager", "nut-driver.service"],
         timeout=5,
     )
-    if rc == 0 and out.strip():
-        return ["nut-driver"]
+    if rc == 0:
+        for line in out.splitlines():
+            if line.split() and line.split()[0] == "nut-driver.service":
+                return ["nut-driver"]
     return [f"nut-driver@{name}" for name in _ups_names()]
 
 
@@ -69,7 +71,7 @@ def restart_driver():
     # through the Docker systemctl shim.
     rc1, out1, err1 = run_cmd(["upsdrvctl", "stop"], timeout=30)
     rc2, out2, err2 = run_cmd(["upsdrvctl", "start"], timeout=30)
-    return rc2, out1 + out2, err1 + err2
+    return rc1 or rc2, out1 + out2, err1 + err2
 
 
 def restart_all():

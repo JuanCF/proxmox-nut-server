@@ -36,9 +36,17 @@ driver_running() {
 }
 
 name_pid_alive() {
-  local pid
-  pid="$(cat "/var/run/nut/${1}.pid" 2>/dev/null || true)"
-  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+  local pidfile pid
+  # Drivers name their pid file <driver>-<ups>.pid (e.g. usbhid-ups-myups.pid),
+  # so match the suffix too; keep the plain <ups>.pid form for older setups.
+  for pidfile in "/var/run/nut/${1}.pid" "/var/run/nut/"*"-${1}.pid"; do
+    [[ -e "$pidfile" ]] || continue
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Dispatch driver lifecycle actions through upsdrvctl. Mirror systemctl:

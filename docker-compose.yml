@@ -4,7 +4,10 @@ services:
     container_name: nutwatch
     # USB access: mount the host USB bus and allow USB character devices via
     # the device cgroup. The cgroup rule is evaluated when devices appear, so
-    # UPS hotplug works without privileged mode.
+    # UPS hotplug works without privileged mode. Trust boundary: the container
+    # can then drive every USB device on the host bus. To scope it down,
+    # replace the mount with a specific /dev/bus/usb/<bus>/<dev> device when
+    # your UPS always reappears at the same path.
     devices:
       - /dev/bus/usb:/dev/bus/usb
     device_cgroup_rules:
@@ -14,7 +17,9 @@ services:
     # Share the host network stack: WOL device discovery needs the LAN's ARP
     # table, and magic-packet broadcasts must reach the physical network.
     # With host networking, `ports:` is ignored; NutWatch serves directly on
-    # host ports 8081 (UI) and 3493 (NUT).
+    # host ports 8081 (UI) and 3493 (NUT). Note: until the first admin
+    # account is created on the Setup page, the UI is open — run the first
+    # `docker compose up` on a trusted network and finish setup promptly.
     network_mode: host
     volumes:
       - nutwatch-config:/etc/nut
