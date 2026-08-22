@@ -411,7 +411,7 @@ sudo NUT_UPS_NAME="myups" NUT_ADMIN_PASS="securepass" AUTO=1 bash scripts/setup.
 | `NUT_MONITOR_PASS` | _(auto-gen)_ | NUT monitor password |
 | `NUT_LISTEN_ADDR` | `0.0.0.0` | NUT listen address |
 | `NUT_LISTEN_PORT` | `3493` | NUT listen port |
-| `NUTWATCH_REF` | `v1.2.0` | NutWatch release tag |
+| `NUTWATCH_REF` | `v1.3.0` | NutWatch release tag |
 | `NUTWATCH_URL_PREFIX` | _(unset)_ | Override tarball URL for local testing |
 
 After install, the app is fully open (no login). Create the first admin with `manage.py create-admin <username>` (run from the NutWatch install directory, e.g. `venv/bin/python manage.py create-admin admin`) to turn on session login and per-user API keys — or create it from the dashboard's first-run Setup page.
@@ -584,7 +584,7 @@ COMMUNITY_SCRIPTS_URL=https://my-mirror.example.com bash vm/nut-vm.sh
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NUTWATCH_REF` | `v1.2.0` | Git tag for release download URL |
+| `NUTWATCH_REF` | `v1.3.0` | Git tag for release download URL |
 | `NUTWATCH_URL_PREFIX` | _(unset)_ | Override URL for testing local builds |
 
 ---
