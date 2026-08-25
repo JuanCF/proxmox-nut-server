@@ -55,7 +55,7 @@ This repository also includes `vm/nut-vm.sh`, a bash script to automatically cre
 
 ### CI/CD & Developer Tooling
 
-- **GitHub Actions** — Lint (shellcheck, shfmt), Python syntax check (py_compile), pytest, frontend tests (Vitest), and automated release workflow on tag push
+- **GitHub Actions** — Lint (shellcheck, shfmt), Python syntax check (py_compile), pytest, frontend tests (Vitest), automated release workflow on tag push, and multi-arch Docker image publishing to GHCR
 - **Makefile** — `check`, `lint`, `fmt`, `fmt-fix`, `lint-python`, `test-python`, `tsc-check`, `lint-frontend`, `build-frontend`, `build-tarball`, `install-tools`
 - **`build-tarball`** — Creates `nutwatch.tar.gz` for release distribution (git-ignored)
 - **Backend Tests** — Pytest suite covering parsers, service layer (UPS, users, upsmon, hooks, WOL, system), auth, route handlers, and utility functions
@@ -440,15 +440,26 @@ admin role.
 
 ### Docker
 
-A multi-stage `Dockerfile` and `docker-compose.yml` are included. The image
+Prebuilt multi-arch images (`linux/amd64`, `linux/arm64`) are published to the
+GitHub Container Registry, so there's no need to clone the repo. The image
 bundles NUT, the NutWatch backend, and a built React frontend.
 
+```
+ghcr.io/juancf/nutwatch
+```
+
+| Tag | Points at |
+|-----|-----------|
+| `latest` | Most recent release |
+| `1.3.0`, `1.3`, `1` | Specific release / minor / major line |
+| `main` | Rolling build of the `main` branch (unreleased) |
+
 ```bash
-# Build and run with Docker Compose
+# Run with Docker Compose — grab just the compose file, no clone required
+curl -fsSLO https://raw.githubusercontent.com/JuanCF/nutwatch/main/docker-compose.yml
 docker compose up -d
 
-# Or build and run manually
-docker build -t nutwatch .
+# Or run the image directly
 docker run -d \
   --name nutwatch \
   --device /dev/bus/usb:/dev/bus/usb \
@@ -457,8 +468,19 @@ docker run -d \
   -p 3493:3493 \
   -v nutwatch-config:/etc/nut \
   -v nutwatch-data:/var/lib/nutwatch \
-  nutwatch
+  ghcr.io/juancf/nutwatch:latest
 ```
+
+To upgrade, pull the new image and recreate the container — both volumes are
+preserved:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+**Building from source instead.** A multi-stage `Dockerfile` is included; clone
+the repo, uncomment the `build: .` line in `docker-compose.yml`, and run
+`docker compose up -d --build` (or `docker build -t nutwatch .`).
 
 **USB access.** NUT drivers need to talk to the UPS over USB. The container
 gets the host USB bus plus an allow-rule for USB character devices:
@@ -607,6 +629,13 @@ git push origin v1.2.3
 ```
 
 The GitHub Actions workflow will run lint checks, build `nutwatch.tar.gz`, and create a GitHub Release.
+
+In parallel, `.github/workflows/docker-publish.yml` builds the `linux/amd64` +
+`linux/arm64` image and pushes it to `ghcr.io/juancf/nutwatch` as `:1.2.3`,
+`:1.2`, `:1`, and `:latest`. Pushes to `main` publish a rolling `:main` tag, and
+pull requests touching the Docker or app sources build the image without
+pushing. Authentication uses the built-in `GITHUB_TOKEN` — no secrets to
+configure.
 
 ### Testing a Local Build
 
