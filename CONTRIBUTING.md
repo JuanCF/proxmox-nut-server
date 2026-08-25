@@ -11,6 +11,7 @@ When cutting a new release (e.g. `v1.2.0`), update the version string in these f
 | `src/frontend/package.json` | `version` field | `"version": "1.2.0"` |
 | `src/frontend/src/constants/index.ts` | `APP_VERSION` constant (line ~99) | `export const APP_VERSION = 'v1.2.0';` |
 | `README.md` | `NUTWATCH_REF` in both env tables (lines ~375, ~451) | `\| \`NUTWATCH_REF\` \| \`v1.2.0\` \| ...` |
+| `README.md` | Docker image tag table in the Docker section | `\| \`1.2.0\`, \`1.2\`, \`1\` \| Specific release ... \|` |
 
 Also check `scripts/setup.sh` for version strings in the header comment (line ~14) and the help output (line ~715).
 
@@ -22,6 +23,7 @@ Also check `scripts/setup.sh` for version strings in the header comment (line ~1
 - The GitHub Release tag triggers the `.github/workflows/release.yml` workflow, which builds and publishes the NutWatch tarball.
 - **Tags must be ancestors of `origin/main`.** The CI workflow (`check-tag-branch` job) enforces this before any downstream jobs run. If a tag is pushed from a feature branch, the release is rejected.
 - The `NUTWATCH_REF` variable in the scripts points to the Git tag, which maps to the release download URL at `https://github.com/JuanCF/nutwatch/releases/download/<tag>/nutwatch.tar.gz`.
+- The same tag also triggers `.github/workflows/docker-publish.yml`, which pushes the multi-arch image to `ghcr.io/juancf/nutwatch` as `:<version>`, `:<major>.<minor>`, `:<major>`, and `:latest`. Pushes to `main` publish `:main`. Both use the built-in `GITHUB_TOKEN`; no registry secrets are needed.
 
 ## Commit conventions
 

@@ -3,7 +3,10 @@
 # Multi-stage build for NutWatch.
 # Stage 1 builds the React frontend; Stage 2 is the runtime image with NUT.
 
-FROM node:22-slim AS frontend-builder
+# Pinned to the build host's architecture: the SPA and the backend sources it
+# is copied alongside are both arch-independent, so there is no reason to run
+# npm under QEMU emulation when cross-building the arm64 image.
+FROM --platform=$BUILDPLATFORM node:22-slim AS frontend-builder
 # Build the React SPA. Vite writes to ../backend/static, so we copy the
 # backend tree into the same relative location before building.
 WORKDIR /build/src/frontend

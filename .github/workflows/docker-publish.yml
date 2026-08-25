@@ -1,0 +1,130 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker-compose.yml'
+      - 'scripts/docker/**'
+      - 'src/**'
+      - '.github/workflows/docker-publish.yml'
+
+# Restrictive default; each job narrows or widens this explicitly.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Mirrors the guard in release.yml: a tag that is not an ancestor of main
+  # must not publish an image, the same way it must not publish a tarball.
+  # Also decides whether this tag is the newest one, so that re-pushing an
+  # older tag cannot drag :latest backwards onto a superseded release.
+  check-tag-branch:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      is-latest: ${{ steps.newest.outputs.is-latest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag is on main branch
+        run: |
+          TAG_SHA=$(git rev-parse "${{ github.ref }}")
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main 2>/dev/null && \
+             [ "$TAG_SHA" != "$(git rev-parse origin/main)" ]; then
+            echo "ERROR: Tag ${{ github.ref_name }} is not on the main branch."
+            echo "Push tags from commits on the main branch only."
+            exit 1
+          fi
+
+      - name: Determine whether this is the newest release tag
+        id: newest
+        run: |
+          highest=$(git tag -l 'v*.*.*' | sort -V | tail -n1)
+          if [ "${{ github.ref_name }}" = "$highest" ]; then
+            echo "is-latest=true" >> "$GITHUB_OUTPUT"
+            echo "${{ github.ref_name }} is the newest tag; :latest will be updated."
+          else
+            echo "is-latest=false" >> "$GITHUB_OUTPUT"
+            echo "${{ github.ref_name }} is superseded by $highest; :latest will be left alone."
+          fi
+
+  build:
+    needs: [check-tag-branch]
+    # check-tag-branch only runs for tag pushes. Without this condition the
+    # build job would be skipped alongside it on branch and pull-request
+    # events; !failure() still blocks the build when the guard rejects a tag.
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # Pull requests build for validation only; nothing is pushed.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag scheme:
+      #   v1.3.0 -> :1.3.0, :1.3, :1 (plus :latest when newest)
+      #   main   -> :main (rolling development build)
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest=false disables the automatic "any semver tag wins :latest"
+          # behaviour; the explicit raw entry below applies it only to the
+          # newest tag.
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable=${{ needs.check-tag-branch.outputs.is-latest == 'true' }}
+          labels: |
+            org.opencontainers.image.title=NutWatch
+            org.opencontainers.image.description=Web UI for managing Network UPS Tools (NUT)
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          # Pull requests validate on amd64 only; emulated arm64 roughly
+          # doubles the run time and adds little for a build-only check.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
