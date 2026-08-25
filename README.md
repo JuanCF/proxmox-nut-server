@@ -444,7 +444,7 @@ Prebuilt multi-arch images (`linux/amd64`, `linux/arm64`) are published to the
 GitHub Container Registry, so there's no need to clone the repo. The image
 bundles NUT, the NutWatch backend, and a built React frontend.
 
-```
+```text
 ghcr.io/juancf/nutwatch
 ```
 
