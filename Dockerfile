@@ -6,7 +6,7 @@
 # Pinned to the build host's architecture: the SPA and the backend sources it
 # is copied alongside are both arch-independent, so there is no reason to run
 # npm under QEMU emulation when cross-building the arm64 image.
-FROM --platform=$BUILDPLATFORM node:22-slim AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-slim AS frontend-builder
 # Build the React SPA. Vite writes to ../backend/static, so we copy the
 # backend tree into the same relative location before building.
 WORKDIR /build/src/frontend
